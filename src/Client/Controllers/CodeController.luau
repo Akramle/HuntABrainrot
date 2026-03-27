@@ -205,18 +205,30 @@ function CodeController:BindUI()
 end
 
 function CodeController:Start()
+	-- Wait for UI instead of polling infinitely
 	task.spawn(function()
-		while true do
-			local main = self._pGui:FindFirstChild("Main")
-			if main then
-				local buttons = main:FindFirstChild("Buttons", true)
-				local btn = buttons and buttons:FindFirstChild("CodesBtn", true)
-				if btn and not btn:GetAttribute("CodeControllerBound") then
-					btn:SetAttribute("CodeControllerBound", true)
-					self:BindUI()
+		local main = self._pGui:WaitForChild("Main")
+		if main then
+			local buttons = main:WaitForChild("Buttons")
+			if buttons then
+				local connection
+				local function checkButton()
+					local btn = buttons:FindFirstChild("CodesBtn", true)
+					if btn and not btn:GetAttribute("CodeControllerBound") then
+						btn:SetAttribute("CodeControllerBound", true)
+						self:BindUI()
+						if connection then
+							connection:Disconnect()
+							connection = nil
+						end
+					end
+				end
+
+				checkButton()
+				if not buttons:FindFirstChild("CodesBtn", true) or not buttons:FindFirstChild("CodesBtn", true):GetAttribute("CodeControllerBound") then
+					connection = buttons.DescendantAdded:Connect(checkButton)
 				end
 			end
-			task.wait(2)
 		end
 	end)
 end
