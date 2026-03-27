@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 
 local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NumberFormatter"))
 local StatCalculator = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("StatCalculator"))
+local SafeZoneHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SafeZoneHelper"))
 
 local AnimalService = {
 	Name = "AnimalService",
@@ -29,6 +30,274 @@ local function getPrimaryPart(target)
 	end
 
 	return nil
+end
+
+local function isPartVisible(part: BasePart): boolean
+	if part.Transparency < 0.95 then
+		return true
+	end
+
+	-- Sometimes a fully transparent part is still visually represented by a mesh/decal.
+	for _, child in ipairs(part:GetChildren()) do
+		if child:IsA("Decal") or child:IsA("Texture") or child:IsA("DataModelMesh") then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function getLowestVisiblePoint(instance: Instance): Vector3?
+	local lowestY = math.huge
+	local lowestPoint = nil
+
+	local parts = if instance:IsA("BasePart") then {instance} else instance:GetDescendants()
+
+	for _, part in ipairs(parts) do
+		if part:IsA("BasePart") and isPartVisible(part) then
+			local cf = part.CFrame
+			local size = part.Size
+
+			local mesh = part:FindFirstChildWhichIsA("DataModelMesh")
+			if mesh and (mesh:IsA("SpecialMesh") or mesh:IsA("BlockMesh") or mesh:IsA("CylinderMesh")) then
+				size = size * mesh.Scale
+				cf = cf * CFrame.new(mesh.Offset)
+			end
+
+			local sx, sy, sz = size.X * 0.5, size.Y * 0.5, size.Z * 0.5
+			local corners = {
+				cf * Vector3.new( sx,  sy,  sz),
+				cf * Vector3.new( sx,  sy, -sz),
+				cf * Vector3.new( sx, -sy,  sz),
+				cf * Vector3.new( sx, -sy, -sz),
+				cf * Vector3.new(-sx,  sy,  sz),
+				cf * Vector3.new(-sx,  sy, -sz),
+				cf * Vector3.new(-sx, -sy,  sz),
+				cf * Vector3.new(-sx, -sy, -sz),
+			}
+
+			for _, corner in ipairs(corners) do
+				if corner.Y < lowestY then
+					lowestY = corner.Y
+					lowestPoint = corner
+				end
+			end
+		end
+	end
+
+	return lowestPoint
+end
+
+local function getLowestAnyPoint(instance: Instance): Vector3?
+	local lowestY = math.huge
+	local lowestPoint = nil
+
+	local parts = if instance:IsA("BasePart") then {instance} else instance:GetDescendants()
+
+	for _, part in ipairs(parts) do
+		if part:IsA("BasePart") then
+			local cf = part.CFrame
+			local size = part.Size
+
+			local mesh = part:FindFirstChildWhichIsA("DataModelMesh")
+			if mesh and (mesh:IsA("SpecialMesh") or mesh:IsA("BlockMesh") or mesh:IsA("CylinderMesh")) then
+				size = size * mesh.Scale
+				cf = cf * CFrame.new(mesh.Offset)
+			end
+
+			local sx, sy, sz = size.X * 0.5, size.Y * 0.5, size.Z * 0.5
+			local corners = {
+				cf * Vector3.new( sx,  sy,  sz),
+				cf * Vector3.new( sx,  sy, -sz),
+				cf * Vector3.new( sx, -sy,  sz),
+				cf * Vector3.new( sx, -sy, -sz),
+				cf * Vector3.new(-sx,  sy,  sz),
+				cf * Vector3.new(-sx,  sy, -sz),
+				cf * Vector3.new(-sx, -sy,  sz),
+				cf * Vector3.new(-sx, -sy, -sz),
+			}
+
+			for _, corner in ipairs(corners) do
+				if corner.Y < lowestY then
+					lowestY = corner.Y
+					lowestPoint = corner
+				end
+			end
+		end
+	end
+
+	return lowestPoint
+end
+
+local function raycastDownToVisiblePart(origin: Vector3, distance: number, ignored: {Instance}): RaycastResult?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local ignoreList = table.clone(ignored or {})
+	local direction = Vector3.new(0, -math.abs(distance), 0)
+
+	for _ = 1, 24 do
+		params.FilterDescendantsInstances = ignoreList
+		local hit = Workspace:Raycast(origin, direction, params)
+		if hit == nil then
+			return nil
+		end
+
+		local hitPart = hit.Instance
+		if hitPart == Workspace.Terrain then
+			return hit
+		end
+		if hitPart:IsA("BasePart") and isPartVisible(hitPart) then
+			return hit
+		end
+
+		table.insert(ignoreList, hitPart)
+	end
+
+	return nil
+end
+
+local function setNoCollision(instance: Instance)
+	if instance:IsA("BasePart") then
+		instance.CanCollide = false
+		instance.CanTouch = false
+		instance.CanQuery = false
+		instance.Massless = true
+		instance.Anchored = false
+	end
+	for _, d in ipairs(instance:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CanQuery = false
+			d.Massless = true
+			d.Anchored = false
+		end
+	end
+end
+
+function AnimalService:_destroyCarriedVisualFromData(data)
+	if type(data) ~= "table" then
+		return
+	end
+	local model = data.carriedModel
+	if model and model.Parent then
+		model:Destroy()
+	end
+	data.carriedModel = nil
+end
+
+function AnimalService:_destroyCarriedVisual(player: Player)
+	local data = self._carriedAnimals[player]
+	self:_destroyCarriedVisualFromData(data)
+end
+
+function AnimalService:_attachCarriedVisual(
+	player: Player,
+	animalName: string,
+	animalRarity: string,
+	savedAttributes: table,
+	savedTags: table,
+	sourceAnimal: Instance?
+)
+	self:_destroyCarriedVisual(player)
+
+	local character = player.Character
+	local head = character and (character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart"))
+	if head == nil or not head:IsA("BasePart") then
+		return
+	end
+
+	local resolvedRarity = animalRarity
+	local visual = nil
+
+	if sourceAnimal and sourceAnimal:IsA("Instance") then
+		visual = sourceAnimal:Clone()
+		local sourceRarity = sourceAnimal:GetAttribute("Rarity")
+		if type(sourceRarity) == "string" and sourceRarity ~= "" then
+			resolvedRarity = sourceRarity
+		end
+
+		-- Carry visuals should not include world interaction/despawn UI from drops.
+		for _, descendant in ipairs(visual:GetDescendants()) do
+			if descendant:IsA("ProximityPrompt") then
+				descendant:Destroy()
+			elseif descendant:IsA("BillboardGui") and descendant.Name == "DespawnTimerGui" then
+				descendant:Destroy()
+			end
+		end
+	else
+		local template
+		template, resolvedRarity = self:_findAnimalTemplateByName(animalName, animalRarity)
+		if template == nil then
+			return
+		end
+		visual = template:Clone()
+	end
+
+	-- Keep the real name so _playIdleAnimation can find the right animation folder.
+	visual.Name = animalName
+	visual:SetAttribute("IsCarriedVisual", true)
+	for attributeName, attributeValue in pairs(savedAttributes or {}) do
+		visual:SetAttribute(attributeName, attributeValue)
+	end
+	visual:SetAttribute("DropSpawnedAt", nil)
+	visual:SetAttribute("DropAnimationOffset", nil)
+	visual:SetAttribute("Rarity", tostring(resolvedRarity))
+
+	-- applyCollectionTags is defined later in this module; call through self to avoid Luau forward-reference lints.
+	AnimalService._applyCollectionTags(visual, savedTags)
+	setNoCollision(visual)
+
+	local primary = getPrimaryPart(visual)
+	if primary == nil then
+		visual:Destroy()
+		return
+	end
+	if visual:IsA("Model") and visual.PrimaryPart == nil then
+		visual.PrimaryPart = primary
+	end
+
+	visual.Parent = character
+
+	-- Position exactly on top of the head (no extra offset), then weld.
+	if visual:IsA("Model") then
+		visual:PivotTo(head.CFrame)
+	else
+		primary.CFrame = head.CFrame
+	end
+
+	local headTopY = head.Position.Y + (head.Size.Y * 0.5)
+	local lowestPoint = getLowestVisiblePoint(visual)
+		or getLowestAnyPoint(visual)
+		or (primary.Position - Vector3.new(0, primary.Size.Y * 0.5, 0))
+	if lowestPoint then
+		local adjustment = headTopY - lowestPoint.Y
+		if visual:IsA("Model") then
+			visual:PivotTo(visual:GetPivot() + Vector3.new(0, adjustment, 0))
+		else
+			primary.CFrame = primary.CFrame + Vector3.new(0, adjustment, 0)
+		end
+	end
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = head
+	weld.Part1 = primary
+	weld.Parent = primary
+
+	-- Make it look alive.
+	self:_applyMutationVisuals(visual)
+	-- Some rigs need a short tick after parenting before animation plays reliably.
+	task.defer(function()
+		if visual.Parent then
+			self:_playIdleAnimation(visual)
+		end
+	end)
+
+	local data = self._carriedAnimals[player]
+	if type(data) == "table" then
+		data.carriedModel = visual
+	end
 end
 
 local function getInteractionPart(target)
@@ -168,6 +437,9 @@ local function applyCollectionTags(instance: Instance, tags)
 	end
 end
 
+-- Expose for earlier carry-visual code without forward-reference warnings.
+AnimalService._applyCollectionTags = applyCollectionTags
+
 local function getRandomInRange(rangeData)
 	if type(rangeData) ~= "table" then
 		return 0
@@ -234,6 +506,11 @@ function AnimalService:Init(runtime)
 	self._stealPromptRemote = runtime.Remotes:GetStealPromptRemote()
 	self._pendingSteals = {}
 	self._dropDespawnTimers = setmetatable({}, {__mode = "k"})
+
+	-- Carrying capture flow (safe-zone delivery)
+	self._carryActionRemote = runtime.Remotes:GetCarryAnimalRemote()
+	self._carriedAnimals = setmetatable({}, {__mode = "k"}) -- [player] = carriedPayload
+	self._carrySafeZoneThreads = setmetatable({}, {__mode = "k"}) -- [player] = thread
 
 	-- Ensure the announcement remote exists immediately for clients
 	self._announcementRemote = runtime.Remotes:GetAnnouncementRemote()
@@ -324,6 +601,7 @@ function AnimalService:_claimPlacedAnimal(player, clone, placePart, placer, prom
 			self._sounds:PlayForPlayer(player, "AnimalStolen", { randomPitch = true })
 			if victimPlayer and victimPlayer:IsA("Player") then
 				self._sounds:PlayForPlayer(victimPlayer, "AnimalStolen", { randomPitch = true })
+				self._runtime:GetService("NotificationService"):NotifyPlayer(victimPlayer, string.format("Your %s was stolen by %s!", clone.Name, player.Name), "Warning")
 			end
 		else
 			self._sounds:PlayForPlayer(player, "AnimalPickedUpFromBase", { randomPitch = true })
@@ -845,26 +1123,27 @@ function AnimalService:_refreshTagText(tagGui, animalName, rarity, cost, revenue
 	local levelLabel = tagGui:FindFirstChild("Level", true)
 	local rarityLabel = tagGui:FindFirstChild("Rarity", true) or tagGui:FindFirstChild("RarityLabel", true)
 
+	if costLabel and costLabel:IsA("TextLabel") then
+		costLabel.Text = "$" .. NumberFormatter:Format(cost, "Letters")
+		costLabel.LayoutOrder = 1
+		costLabel.Visible = true
+	end
 	if levelLabel and levelLabel:IsA("TextLabel") then
 		levelLabel.Text = "lvl " .. tostring(math.max(1, math.floor(tonumber(level) or 1)))
-		levelLabel.LayoutOrder = 1
+		levelLabel.LayoutOrder = 2
 	end
 	if nameLabel and nameLabel:IsA("TextLabel") then
 		nameLabel.Text = animalName
-		nameLabel.LayoutOrder = 2
-	end
-	if rarityLabel and rarityLabel:IsA("TextLabel") then
-		rarityLabel.Text = tostring(rarity or "")
-		rarityLabel.LayoutOrder = 3
+		nameLabel.LayoutOrder = 3
 	end
 	if revenueLabel and revenueLabel:IsA("TextLabel") then
 		revenueLabel.Text = "$" .. NumberFormatter:Format(revenue, "Letters") .. "/s"
 		revenueLabel.LayoutOrder = 4
 	end
-	if costLabel and costLabel:IsA("TextLabel") then
-		costLabel.Text = "$" .. NumberFormatter:Format(cost, "Letters")
-		costLabel.LayoutOrder = 5
-		costLabel.Visible = false -- Hidden per user request list
+	if rarityLabel and rarityLabel:IsA("TextLabel") then
+		rarityLabel.Text = tostring(rarity or "")
+		rarityLabel.LayoutOrder = -75
+		rarityLabel.Parent = tagGui -- Move to top level for sibling ordering with Gold/Mutations
 	end
 end
 
@@ -881,7 +1160,9 @@ function AnimalService:_recalculateAnimalStats(animal)
 	local mutations = {
 		IsGold = animal:GetAttribute("IsGold") == true,
 		IsMalevolent = animal:GetAttribute("IsMalevolent") == true,
-		IsSoaked = animal:GetAttribute("IsSoaked") == true
+		IsSoaked = animal:GetAttribute("IsSoaked") == true,
+		IsTwistborn = animal:GetAttribute("IsTwistborn") == true,
+		IsAlien = animal:GetAttribute("IsAlien") == true
 	}
 
 	local stats = StatCalculator.CalculateAnimalStats(baseRevenue, level, upgradeLevel, mutations, self._config)
@@ -933,6 +1214,42 @@ function AnimalService:ApplySoakedMutation(animal)
 	local health = animal:GetAttribute("Health")
 	self:_updateHealthBar(animal, health, animal:GetAttribute("MaxHealth"), false)
 end
+
+function AnimalService:ApplyTwistbornMutation(animal)
+	if animal:GetAttribute("IsTwistborn") then return end
+
+	local maxHealth = animal:GetAttribute("MaxHealth")
+	if not maxHealth then return end -- Not initialized yet
+
+	animal:SetAttribute("IsTwistborn", true)
+
+	self:_recalculateAnimalStats(animal)
+
+	self:_applyMutationVisuals(animal)
+	self:_refreshAnimalTag(animal)
+
+	-- Update health bar
+	local health = animal:GetAttribute("Health")
+	self:_updateHealthBar(animal, health, animal:GetAttribute("MaxHealth"), false)
+end
+
+function AnimalService:ApplyAlienMutation(animal)
+	if animal:GetAttribute("IsAlien") then return end
+
+	local maxHealth = animal:GetAttribute("MaxHealth")
+	if not maxHealth then return end -- Not initialized yet
+
+	animal:SetAttribute("IsAlien", true)
+
+	self:_recalculateAnimalStats(animal)
+
+	self:_applyMutationVisuals(animal)
+	self:_refreshAnimalTag(animal)
+
+	-- Update health bar
+	local health = animal:GetAttribute("Health")
+	self:_updateHealthBar(animal, health, animal:GetAttribute("MaxHealth"), false)
+end
 function AnimalService:_applyMutationVisuals(animal)
 	-- Try to find a valid VFX parent part. Essential for particles to appear.
 	local vfxInstance = animal:FindFirstChild("VfxInstance", true) 
@@ -949,7 +1266,9 @@ function AnimalService:_applyMutationVisuals(animal)
 	local mutations = {
 		Gold = animal:GetAttribute("IsGold") == true,
 		Malevolent = animal:GetAttribute("IsMalevolent") == true,
-		Soaked = animal:GetAttribute("IsSoaked") == true
+		Soaked = animal:GetAttribute("IsSoaked") == true,
+		Twistborn = animal:GetAttribute("IsTwistborn") == true,
+		Alien = animal:GetAttribute("IsAlien") == true
 	}
 
 	-- Apply Particles for each active mutation
@@ -1020,6 +1339,9 @@ function AnimalService:_refreshAnimalTag(animal)
 	if not tagGui or not tagGui:IsA("BillboardGui") then return end
 
 	local rarity = animal:GetAttribute("Rarity")
+	if type(rarity) ~= "string" or rarity == "" then
+		return
+	end
 	local baseTag = self._tagsFolder:FindFirstChild(rarity)
 	local baseSize = baseTag and baseTag.Size or UDim2.fromScale(4, 2.5)
 
@@ -1039,13 +1361,17 @@ function AnimalService:_refreshAnimalTag(animal)
 	local activeIconMutations = {}
 	if animal:GetAttribute("IsMalevolent") then table.insert(activeIconMutations, "Malevolent") end
 	if animal:GetAttribute("IsSoaked") then table.insert(activeIconMutations, "Soaked") end
+	if animal:GetAttribute("IsTwistborn") then table.insert(activeIconMutations, "Twistborn") end
+	if animal:GetAttribute("IsAlien") then table.insert(activeIconMutations, "Alien") end
 	local hasMutations = #activeIconMutations > 0
 
 	-- Calculate multiplier to avoid stretching
 	local extraHeight = 0
+	local rarityScale = 0.20
 	local goldScale = 0.25
 	local mutationsScale = 0.35
 	
+	extraHeight += rarityScale -- Rarity is always shown
 	if isGold then extraHeight += goldScale end
 	if hasMutations then extraHeight += mutationsScale end
 	local multiplier = 1 + extraHeight
@@ -1067,6 +1393,13 @@ function AnimalService:_refreshAnimalTag(animal)
 		mainFrame.Size = UDim2.fromScale(1, 1 / multiplier)
 		mainFrame.LayoutOrder = 0
 		mainFrame.Parent = tagGui
+	end
+
+	-- Handle Rarity size
+	local rarityLabel = tagGui:FindFirstChild("Rarity", true) or tagGui:FindFirstChild("RarityLabel", true)
+	if rarityLabel and rarityLabel:IsA("TextLabel") then
+		rarityLabel.Size = UDim2.fromScale(1, rarityScale / multiplier)
+		rarityLabel.Visible = true
 	end
 
 	-- Handle "Gold" specifically
@@ -1197,6 +1530,7 @@ function AnimalService:_buildAnimalTool(player, animalName, animalRarity, savedA
 	for attributeName, attributeValue in pairs(savedAttributes) do
 		visual:SetAttribute(attributeName, attributeValue)
 	end
+	visual:SetAttribute("Rarity", tostring(resolvedRarity))
 
 	local tool = Instance.new("Tool")
 	tool.Name = animalName
@@ -1281,6 +1615,16 @@ function AnimalService:_buildAnimalTool(player, animalName, animalRarity, savedA
 	tool.Grip = CFrame.new(-1.05, 0, 0) * CFrame.Angles(math.rad(-90), math.rad(180), 0)
 
 	tool.Equipped:Connect(function()
+		-- While carrying a captured animal, the player is not allowed to equip anything.
+		if player:GetAttribute("CarryingAnimal") then
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid:UnequipTools()
+			end
+			return
+		end
+
 		player:SetAttribute("HasAnimal", true)
 		self:_togglePlayerPlacers(player, true)
 		self:_playIdleAnimation(visual)
@@ -1321,7 +1665,7 @@ function AnimalService:_giveAnimalTool(player, animalName, animalRarity, savedAt
 	return tool
 end
 
-function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedAttributes)
+function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedAttributes, savedTags, dropOptions)
 	local rarityFolder = self._animalsStorage:FindFirstChild(animalRarity)
 	local template = rarityFolder and rarityFolder:FindFirstChild(animalName)
 	if template == nil then
@@ -1329,7 +1673,7 @@ function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedA
 	end
 
 	local droppable = template:Clone()
-	for attributeName, attributeValue in pairs(savedAttributes) do
+	for attributeName, attributeValue in pairs(savedAttributes or {}) do
 		droppable:SetAttribute(attributeName, attributeValue)
 	end
 	droppable:SetAttribute("DropSpawnedAt", Workspace:GetServerTimeNow())
@@ -1348,9 +1692,58 @@ function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedA
 	end
 
 	droppable.Parent = self._dropsFolder
-	droppable:PivotTo(animalPivot * CFrame.new(0, 1.5, 0))
+
+	-- If we already snapped to a floor hit point, do not add legacy Y-offset.
+	local fromGroundHit = type(dropOptions) == "table" and dropOptions.fromGroundHit == true
+	local finalPivot = fromGroundHit and animalPivot or (animalPivot * CFrame.new(0, 1.5, 0))
+	droppable:PivotTo(finalPivot)
+
+	-- Iterative snapping loop from SpawnService logic
+	local ignore = {self._dropsFolder, droppable}
+	if type(dropOptions) == "table" and type(dropOptions.ignoreInstances) == "table" then
+		for _, instance in ipairs(dropOptions.ignoreInstances) do
+			if typeof(instance) == "Instance" then
+				table.insert(ignore, instance)
+			end
+		end
+	end
+
+	for step = 1, 15 do
+		local lowestPoint = getLowestVisiblePoint(droppable)
+		if not lowestPoint then break end
+
+		local floorRayOrigin = lowestPoint + Vector3.new(0, 10, 0)
+		local floorRay = raycastDownToVisiblePart(floorRayOrigin, 20, ignore)
+		
+		if floorRay then
+			local penetration = floorRay.Position.Y - lowestPoint.Y
+			if penetration > 0.01 then
+				-- It's inside the ground! Push the whole model up by the exact penetration amount
+				droppable:PivotTo(droppable:GetPivot() + Vector3.new(0, penetration + 0.01, 0))
+			else
+				break -- It is completely clear of the floor!
+			end
+		else
+			break
+		end
+	end
+
+	-- Preserve any CollectionService tags we were given (e.g. special weapon tags).
+	if type(savedTags) == "table" then
+		for _, tagName in ipairs(savedTags) do
+			if type(tagName) == "string" then
+				CollectionService:AddTag(droppable, tagName)
+			end
+		end
+	end
+
 	self:_attachAnimalTag(droppable, animalRarity)
 	self:_applyMutationVisuals(droppable)
+	task.defer(function()
+		if droppable.Parent then
+			self:_playIdleAnimation(droppable)
+		end
+	end)
 
 	local promptParent = getInteractionPart(droppable)
 	if promptParent == nil then
@@ -1421,6 +1814,12 @@ function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedA
 		if pickedUp then
 			return
 		end
+
+		-- If the player is already carrying something (or hiding), ignore this pickup.
+		if player:GetAttribute("CarryingAnimal") or player:GetAttribute("IsHiding") then
+			return
+		end
+
 		pickedUp = true
 		proximityPrompt.Enabled = false
 		
@@ -1440,18 +1839,205 @@ function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedA
 			self._sounds:PlayForPlayer(player, "AnimalPickup", { randomPitch = true })
 		end
 
+		-- Switch to "carrying" state: player must walk to safe zone to receive the inventory tool.
+		self:_startCarryingAnimal(
+			player,
+			animalName,
+			animalRarity,
+			droppable:GetAttributes(),
+			CollectionService:GetTags(droppable),
+			droppable
+		)
 		task.delay(0.22, function()
 			if droppable.Parent == nil then
 				return
 			end
-
-			self:_giveAnimalTool(player, animalName, animalRarity, droppable:GetAttributes(), CollectionService:GetTags(droppable))
 			droppable:Destroy()
-			
-			-- Refresh placers in case the player picked up an animal while holding one
-			self:_togglePlayerPlacers(player, player:GetAttribute("HasAnimal") == true)
 		end)
 	end)
+end
+
+function AnimalService:_cancelCarryWatcher(player: Player)
+	local thread = self._carrySafeZoneThreads and self._carrySafeZoneThreads[player]
+	if thread then
+		pcall(function()
+			if thread ~= coroutine.running() then
+				task.cancel(thread)
+			end
+		end)
+		self._carrySafeZoneThreads[player] = nil
+	end
+end
+
+function AnimalService:_unequipForCarry(player: Player)
+	-- Unequip standard Tools.
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:UnequipTools()
+	end
+
+	-- Unequip FakeToolService configurations immediately (if available).
+	local fakeToolService = self._runtime and self._runtime:GetService("FakeToolService")
+	if fakeToolService and type(fakeToolService._unequipAll) == "function" then
+		pcall(function()
+			fakeToolService:_unequipAll(player)
+		end)
+	end
+
+	-- Hard lock combat/placement while carrying.
+	player:SetAttribute("IsArmed", false)
+	player:SetAttribute("HasAnimal", false)
+	self:_togglePlayerPlacers(player, false)
+end
+
+function AnimalService:_startCarryingAnimal(
+	player: Player,
+	animalName: string,
+	animalRarity: string,
+	savedAttributes: table,
+	savedTags: table,
+	sourceAnimal: Instance?
+)
+	-- Prevent double-pickup.
+	if player:GetAttribute("CarryingAnimal") then
+		return false
+	end
+	if player:GetAttribute("IsHiding") then
+		return false
+	end
+	if type(animalName) ~= "string" or type(animalRarity) ~= "string" then
+		return false
+	end
+
+	-- Capture last known position for later dropping.
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	local lastPos = hrp and hrp.Position or Vector3.zero
+
+	self._carriedAnimals[player] = {
+		animalName = animalName,
+		animalRarity = animalRarity,
+		attributes = savedAttributes or {},
+		tags = savedTags or {},
+		lastPosition = lastPos,
+		carriedModel = nil,
+	}
+
+	-- Signal the rest of the game to enter the "carrying" state:
+	-- - server: unequip/lock combat
+	-- - client: hide UI and show Drop button
+	player:SetAttribute("CarryingAnimal", true)
+
+	self:_unequipForCarry(player)
+	self:_attachCarriedVisual(player, animalName, animalRarity, savedAttributes, savedTags, sourceAnimal)
+
+	-- Start safe-zone watcher to grant the inventory tool.
+	self:_cancelCarryWatcher(player)
+	self._carrySafeZoneThreads[player] = task.spawn(function()
+		while player.Parent ~= nil and player:GetAttribute("CarryingAnimal") == true do
+			local char = player.Character
+			local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+
+			if rootPart then
+				local data = self._carriedAnimals[player]
+				if data then
+					data.lastPosition = rootPart.Position
+				end
+
+				if not player:GetAttribute("IsHiding") and SafeZoneHelper.isInSafeZone(rootPart.Position) then
+					self:_grantCarriedAnimalToPlayer(player)
+					return
+				end
+			end
+
+			task.wait(0.2)
+		end
+	end)
+
+	return true
+end
+
+function AnimalService:_grantCarriedAnimalToPlayer(player: Player)
+	local data = self._carriedAnimals[player]
+	-- Always clear carry state, even if payload is missing.
+	player:SetAttribute("CarryingAnimal", false)
+	self._carriedAnimals[player] = nil
+
+	-- Remove carried visual immediately.
+	self:_destroyCarriedVisualFromData(data)
+
+	self:_cancelCarryWatcher(player)
+
+	if type(data) == "table" and type(data.animalName) == "string" and type(data.animalRarity) == "string" then
+		-- Grant into inventory (Backpack). Player can equip + place from there.
+		local tool = self:_giveAnimalTool(player, data.animalName, data.animalRarity, data.attributes, data.tags, false)
+
+		-- Auto-equip the newly granted tool.
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and tool and tool.Parent then
+			pcall(function()
+				humanoid:EquipTool(tool)
+			end)
+		end
+
+		-- Ask client inventory UI to force it into hotbar slot 2.
+		if self._carryActionRemote and tool then
+			self._carryActionRemote:FireClient(player, "ForceHotbarSlot", { instance = tool, slot = 2 })
+		end
+		
+		-- Play delivery effects
+		self._effects:EmitToPlayer(player, self._config.Effects.Names.AnimalDelivered)
+		self._sounds:PlayForPlayer(player, "AnimalPlaced", { randomPitch = true })
+	end
+end
+
+function AnimalService:DropCarriedAnimal(player: Player)
+	if player == nil or not player:IsA("Player") then
+		return
+	end
+	if not player:GetAttribute("CarryingAnimal") then
+		return
+	end
+
+	local data = self._carriedAnimals[player]
+
+	-- Stop watcher first so we don't double-grant while dropping.
+	self:_cancelCarryWatcher(player)
+
+	player:SetAttribute("CarryingAnimal", false)
+	self._carriedAnimals[player] = nil
+
+	-- Remove carried visual before dropping.
+	self:_destroyCarriedVisualFromData(data)
+
+	if type(data) == "table" and type(data.animalName) == "string" and type(data.animalRarity) == "string" then
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local pivot = hrp and hrp.CFrame or CFrame.new(data.lastPosition or Vector3.zero)
+
+		-- Snap to ground: raycast down and place the drop at the hit position.
+		local origin = (hrp and hrp.Position) or (data.lastPosition or Vector3.zero)
+		local ignore = {self._dropsFolder}
+		if char then table.insert(ignore, char) end
+		local hit = raycastDownToVisiblePart(origin + Vector3.new(0, 6, 0), 500, ignore)
+		if hit then
+			pivot = CFrame.new(hit.Position) * (pivot - pivot.Position)
+		end
+
+		self:_dropAnimal(
+			data.animalName,
+			data.animalRarity,
+			pivot,
+			data.attributes,
+			data.tags,
+			{
+				fromGroundHit = hit ~= nil,
+				ignoreInstances = ignore,
+			}
+		)
+	end
 end
 
 function AnimalService:_setupPlacedAnimalOptions(clone, base, pad, placePart, placer)
@@ -2048,7 +2634,9 @@ function AnimalService:_setupWildAnimal(animal, isManual)
 	clickDetector.Parent = interactionPart
 
 	clickDetector.MouseClick:Connect(function(player)
-		if not player:GetAttribute("IsArmed") or player:GetAttribute("IsHiding") then
+		if not player:GetAttribute("IsArmed")
+			or player:GetAttribute("IsHiding")
+			or player:GetAttribute("CarryingAnimal") then
 			return
 		end
 		
@@ -2163,7 +2751,7 @@ function AnimalService:_handleAnimalDeath(animal, player)
 
 	task.delay(0.1, function()
 		if animal.Parent then
-			self:_dropAnimal(animal.Name, rarity, animal:GetPivot(), savedAttributes)
+			self:_dropAnimal(animal.Name, rarity, animal:GetPivot(), savedAttributes, CollectionService:GetTags(animal))
 			animal:Destroy()
 		end
 	end)
@@ -2183,6 +2771,30 @@ function AnimalService:Start()
 
 		self:_clearPendingSteal(player.UserId, true)
 	end)
+
+	-- Drop button for the safe-zone delivery mechanic.
+	self._carryActionRemote.OnServerEvent:Connect(function(player, action)
+		if action == "Drop" then
+			self:DropCarriedAnimal(player)
+		end
+	end)
+
+	-- If the player dies / respawns while carrying, drop the carried animal.
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterRemoving:Connect(function()
+			if player:GetAttribute("CarryingAnimal") then
+				self:DropCarriedAnimal(player)
+			end
+		end)
+	end)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		player.CharacterRemoving:Connect(function()
+			if player:GetAttribute("CarryingAnimal") then
+				self:DropCarriedAnimal(player)
+			end
+		end)
+	end
 
 	for _, placer in ipairs(CollectionService:GetTagged("Placer")) do
 		self:_bindPlacer(placer)
@@ -2205,6 +2817,13 @@ function AnimalService:Start()
 	Players.PlayerRemoving:Connect(function(player)
 		self._playerCooldowns[player] = nil
 		self:_clearPendingSteal(player.UserId, true)
+
+		-- Clean up carrying state so watcher threads don't linger.
+		if player:GetAttribute("CarryingAnimal") then
+			self:_cancelCarryWatcher(player)
+			self._carriedAnimals[player] = nil
+			player:SetAttribute("CarryingAnimal", false)
+		end
 	end)
 end
 
