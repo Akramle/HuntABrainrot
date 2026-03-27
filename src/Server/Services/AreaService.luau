@@ -161,38 +161,41 @@ function AreaService:Start()
 	end)
 
 	-- Teleport cheaters who enter locked areas
-	RunService.Heartbeat:Connect(function()
-		if not self._areasFolder then return end
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			if not self._areasFolder then continue end
 
-		for _, player in ipairs(Players:GetPlayers()) do
-			local character = player.Character
-			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-			if rootPart then
-				local currentArea = self:GetAreaFromPosition(rootPart.Position)
-				
-				if not self:HasAreaUnlocked(player, currentArea) then
-					-- Debounce teleport to prevent rapid loop stuttering
-					if player:GetAttribute("Teleporting") then continue end
-					player:SetAttribute("Teleporting", true)
+			for _, player in ipairs(Players:GetPlayers()) do
+				local character = player.Character
+				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+				if rootPart then
+					local currentArea = self:GetAreaFromPosition(rootPart.Position)
+					
+					if not self:HasAreaUnlocked(player, currentArea) then
+						-- Debounce teleport to prevent rapid loop stuttering
+						if player:GetAttribute("Teleporting") then continue end
+						player:SetAttribute("Teleporting", true)
 
-					-- Try to teleport them to their base's spawn location first
-					local spawnLoc = player.RespawnLocation
-					if not spawnLoc then
-						-- Fallback if they don't have a base or spawn location yet
-						spawnLoc = Workspace:FindFirstChildWhichIsA("SpawnLocation")
+						-- Try to teleport them to their base's spawn location first
+						local spawnLoc = player.RespawnLocation
+						if not spawnLoc then
+							-- Fallback if they don't have a base or spawn location yet
+							spawnLoc = Workspace:FindFirstChildWhichIsA("SpawnLocation")
+						end
+
+						if spawnLoc then
+							rootPart.CFrame = spawnLoc.CFrame + Vector3.new(0, 5, 0)
+						else
+							-- Absolute fallback if no spawn location exists anywhere
+							rootPart.CFrame = CFrame.new(0, 10, 0)
+						end
+
+						-- Reset state after short delay
+						task.delay(1, function()
+							if player then player:SetAttribute("Teleporting", nil) end
+						end)
 					end
-					
-					if spawnLoc then
-						rootPart.CFrame = spawnLoc.CFrame + Vector3.new(0, 5, 0)
-					else
-						-- Absolute fallback if no spawn location exists anywhere
-						rootPart.CFrame = CFrame.new(0, 10, 0)
-					end
-					
-					-- Reset state after short delay
-					task.delay(1, function()
-						if player then player:SetAttribute("Teleporting", nil) end
-					end)
 				end
 			end
 		end
