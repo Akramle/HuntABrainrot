@@ -43,7 +43,7 @@ function HidingController:Start()
 			-- Show custom inventory
 			local inventoryGui = player.PlayerGui:FindFirstChild("ModernStylizedInventory")
 			if inventoryGui then
-				inventoryGui.Enabled = not player:GetAttribute("CarryingAnimal")
+				inventoryGui.Enabled = true
 			end
 
 			-- Return camera to normal behavior

@@ -37,9 +37,9 @@ function UpgradeService:UpdatePlayerWalkspeed(player: Player)
 			local gearBonus = player:GetAttribute("GearWalkspeedBonus") or 0
 			local baseWS = StatCalculator.CalculateWalkspeed(level, self._config, gearBonus)
 			
-			-- NEW: 20% Reduction when carrying animal
+			-- Carrying uses a fixed movement speed.
 			if player:GetAttribute("CarryingAnimal") then
-				baseWS *= 0.8
+				baseWS = 19
 			end
 			
 			humanoid.WalkSpeed = baseWS
@@ -170,7 +170,6 @@ function UpgradeService:Start()
 				bucks.Value -= cost
 				wsLevelVal.Value += 1
 				self:UpdatePlayerWalkspeed(player)
-				self._runtime:GetService("SoundService"):PlayForPlayer(player, "AnimalUpgrade", {randomPitch = true})
 				
 				-- Trigger PlayerUpgrade effect
 				local effectsRemote = self._runtime.Remotes:GetEffectsRemote()
@@ -230,9 +229,6 @@ function UpgradeService:Start()
 					end
 				end
 				
-				-- Play sound
-				self._runtime:GetService("SoundService"):PlayForPlayer(player, "AnimalUpgrade", {randomPitch = true})
-
 				-- Trigger PlayerUpgrade effect
 				local effectsRemote = self._runtime.Remotes:GetEffectsRemote()
 				if effectsRemote then

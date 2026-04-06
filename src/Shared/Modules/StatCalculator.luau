@@ -9,7 +9,7 @@ function StatCalculator.CalculateSwordDamage(baseDamage: number, level: number, 
 end
 
 function StatCalculator.CalculateWalkspeed(level: number, config: table, gearBonus: number?)
-	local baseSpeed = 16
+	local baseSpeed = 24
 	local wsConfig = config.Upgrades and config.Upgrades.Walkspeed
 	local bonusPerLevel = if wsConfig then (wsConfig.SpeedBonusPerLevel or 2) else 2
 	local bonus = gearBonus or 0

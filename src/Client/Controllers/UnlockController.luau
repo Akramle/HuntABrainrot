@@ -92,13 +92,21 @@ end
 function UnlockController:_applyEffects(active)
 	self:_setMovementLocked(active)
 	
-	-- Toggle Main HUD visibility
 	local playerGui = self._player:FindFirstChild("PlayerGui")
 	local mainHud = playerGui and playerGui:FindFirstChild("Main")
 	if mainHud and mainHud:IsA("ScreenGui") then
+		local isCarrying = self._player:GetAttribute("CarryingAnimal") == true
 		for _, child in ipairs(mainHud:GetChildren()) do
 			if child:IsA("GuiObject") and child.Name ~= "CoinsFrame" then
-				child.Visible = not active
+				if active then
+					child.Visible = false
+				else
+					if isCarrying then
+						child.Visible = (child.Name == "DropBtn")
+					else
+						child.Visible = (child.Name ~= "DropBtn")
+					end
+				end
 			end
 		end
 	end
@@ -139,7 +147,17 @@ function UnlockController:_hookUpGui(screenGui: ScreenGui)
 	local backFrame = main:FindFirstChild("BackFrame")
 	local closeBtn = backFrame and backFrame:FindFirstChild("btn")
 	local resultLabel = main:FindFirstChild("result")
+	local areaLabel = main:FindFirstChild("TextLabel")
 	
+	local areaName = screenGui:GetAttribute("AreaName")
+	local price = screenGui:GetAttribute("Price")
+	local unlockerRefObj = screenGui:FindFirstChild("UnlockerRef")
+	local unlockerRef = unlockerRefObj and unlockerRefObj.Value
+
+	if areaLabel and areaName then
+		areaLabel.Text = "Do you want to unlock " .. areaName .. "?"
+	end
+
 	-- Initial state for juice
 	local uiScale = main:FindFirstChildOfClass("UIScale")
 	if not uiScale then
@@ -156,7 +174,10 @@ function UnlockController:_hookUpGui(screenGui: ScreenGui)
 	TweenService:Create(uiScale, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	TweenService:Create(main, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
 
+	local isProcessing = false
+
 	local function closeGui()
+		if isProcessing then return end
 		self:_applyEffects(false)
 		TweenService:Create(uiScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Scale = 0.7 }):Play()
 		local tween = TweenService:Create(main, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { BackgroundTransparency = 1 })
@@ -167,29 +188,38 @@ function UnlockController:_hookUpGui(screenGui: ScreenGui)
 	end
 	
 	if acceptBtn then
-		acceptBtn.MouseButton1Click:Connect(function()
-			local areaName = screenGui:GetAttribute("AreaName")
-			local price = screenGui:GetAttribute("Price")
-			local unlockerRefObj = screenGui:FindFirstChild("UnlockerRef")
-			local unlockerRef = unlockerRefObj and unlockerRefObj.Value
+		acceptBtn.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+			if isProcessing then return end
 			
 			if not areaName or not price then 
 				closeGui()
 				return 
 			end
 			
+			isProcessing = true
 			local success = self._unlockRemote:InvokeServer(areaName, price)
+			
 			if success then
+				local soundController = self._runtime:GetController("SoundController")
+				if soundController then
+					soundController:PlayLocal("Buy", {randomPitch = true})
+				end
+				
 				if resultLabel then
 					resultLabel.Text = "AREA UNLOCKED!"
 					resultLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
 				end
 				
-				-- Trigger confetti burst
-				ScreenEffects.ConfettiBurst(self._player)
+				-- Enhanced Reward Effects
+				ScreenEffects.RewardEffect(self._player, {
+					CameraIntensity = 15,
+					Confetti = true,
+					ConfettiAmount = 100
+				})
 				
 				-- Feedback scale juice
-				TweenService:Create(uiScale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1.1}):Play()
+				TweenService:Create(uiScale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1.15}):Play()
 				task.delay(0.2, function()
 					if uiScale.Parent then
 						TweenService:Create(uiScale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Scale = 1}):Play()
@@ -199,12 +229,13 @@ function UnlockController:_hookUpGui(screenGui: ScreenGui)
 				if unlockerRef and unlockerRef.Parent then
 					self:_hideUnlocker(unlockerRef)
 				end
-
 				
-				task.delay(1.2, function()
+				task.delay(1.5, function()
+					isProcessing = false -- Allow the actual close logic to run
 					closeGui()
 				end)
 			else
+				isProcessing = false
 				if resultLabel then
 					resultLabel.Text = "NOT ENOUGH BUCKS!"
 					resultLabel.TextColor3 = Color3.fromRGB(255, 85, 85)
@@ -230,9 +261,17 @@ function UnlockController:_hookUpGui(screenGui: ScreenGui)
 	end
 	
 	if closeBtn then
-		closeBtn.MouseButton1Click:Connect(closeGui)
+		closeBtn.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				closeGui()
+			end
+		end)
 	elseif backFrame and backFrame:IsA("GuiButton") then
-		backFrame.MouseButton1Click:Connect(closeGui)
+		backFrame.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				closeGui()
+			end
+		end)
 	end
 end
 
@@ -258,8 +297,13 @@ function UnlockController:Start()
 	
 	local function checkUnlocker(model)
 		local areaVal = model:FindFirstChild("Area")
-		if areaVal and unlockedAreas:FindFirstChild(areaVal.Value) then
-			self:_hideUnlocker(model)
+		if areaVal then
+			local statVal = unlockedAreas:FindFirstChild(areaVal.Value)
+			if statVal and statVal:IsA("BoolValue") and statVal.Value == true then
+				self:_hideUnlocker(model)
+			else
+				self:_showUnlockerForArea(areaVal.Value)
+			end
 		end
 	end
 
@@ -269,14 +313,40 @@ function UnlockController:Start()
 
 	CollectionService:GetInstanceAddedSignal("Unlocker"):Connect(checkUnlocker)
 	
+	-- When a new BoolValue is added to UnlockedAreas
 	unlockedAreas.ChildAdded:Connect(function(areaBool)
-		for _, model in ipairs(CollectionService:GetTagged("Unlocker")) do
-			local areaVal = model:FindFirstChild("Area")
-			if areaVal and areaVal.Value == areaBool.Name then
-				self:_hideUnlocker(model)
+		if areaBool:IsA("BoolValue") then
+			areaBool.Changed:Connect(function()
+				for _, model in ipairs(CollectionService:GetTagged("Unlocker")) do
+					local areaVal = model:FindFirstChild("Area")
+					if areaVal and areaVal.Value == areaBool.Name then
+						checkUnlocker(model)
+					end
+				end
+			end)
+			
+			for _, model in ipairs(CollectionService:GetTagged("Unlocker")) do
+				local areaVal = model:FindFirstChild("Area")
+				if areaVal and areaVal.Value == areaBool.Name then
+					checkUnlocker(model)
+				end
 			end
 		end
 	end)
+	
+	-- Also connect to any existing BoolValues just in case
+	for _, child in ipairs(unlockedAreas:GetChildren()) do
+		if child:IsA("BoolValue") then
+			child.Changed:Connect(function()
+				for _, model in ipairs(CollectionService:GetTagged("Unlocker")) do
+					local areaVal = model:FindFirstChild("Area")
+					if areaVal and areaVal.Value == child.Name then
+						checkUnlocker(model)
+					end
+				end
+			end)
+		end
+	end
 	
 	unlockedAreas.ChildRemoved:Connect(function(areaBool)
 		self:_showUnlockerForArea(areaBool.Name)

@@ -18,6 +18,7 @@ function FriendNpcController:Init(runtime)
 	self._runtime = runtime
 	self._player = Players.LocalPlayer
 	self._friendIds = {}
+	self._descriptionCache = {}
 end
 
 function FriendNpcController:_getFriends()
@@ -54,11 +55,18 @@ function FriendNpcController:_applyFriendToLocalNpc(npc: Model, userId: number)
 	local humanoid = npc:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	local success, description = pcall(function()
-		return Players:GetHumanoidDescriptionFromUserId(userId)
-	end)
+	local description = self._descriptionCache[userId]
+	if description == nil then
+		local success, fetched = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserId(userId)
+		end)
+		if success and fetched then
+			description = fetched
+			self._descriptionCache[userId] = fetched
+		end
+	end
 
-	if success and description then
+	if description then
 		-- Applying locally on the client only affects this player's view
 		pcall(function()
 			humanoid:ApplyDescription(description)
@@ -83,6 +91,7 @@ end
 
 function FriendNpcController:_setupNpc(npc: Model)
 	if #self._friendIds == 0 then return end
+	if npc:FindFirstChild("LocalVisual") then return end
 	
 	-- We create a local-only visual override
 	-- Original NPC remains for physics/logic, but we hide its parts locally

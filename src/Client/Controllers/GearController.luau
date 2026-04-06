@@ -76,9 +76,18 @@ function GearController:_applyEffects(active)
 	local playerGui = self._player:FindFirstChild("PlayerGui")
 	local mainHud = playerGui and playerGui:FindFirstChild("Main")
 	if mainHud and mainHud:IsA("ScreenGui") then
+		local isCarrying = self._player:GetAttribute("CarryingAnimal") == true
 		for _, child in ipairs(mainHud:GetChildren()) do
 			if child:IsA("GuiObject") and child.Name ~= "CoinsFrame" then
-				child.Visible = not active
+				if active then
+					child.Visible = false
+				else
+					if isCarrying then
+						child.Visible = (child.Name == "DropBtn")
+					else
+						child.Visible = (child.Name ~= "DropBtn")
+					end
+				end
 			end
 		end
 	end
@@ -173,6 +182,17 @@ end
 function GearController:_updateLocalWalkspeed(bonus)
 	local humanoid = self._player.Character and self._player.Character:FindFirstChild("Humanoid")
 	if humanoid then
+		-- Fixed carrying speed or hiding state should always take priority
+		if self._player:GetAttribute("IsHiding") then
+			humanoid.WalkSpeed = 0
+			return
+		end
+		
+		if self._player:GetAttribute("CarryingAnimal") then
+			humanoid.WalkSpeed = 19
+			return
+		end
+
 		local StatCalculator = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("StatCalculator"))
 		local stats = self._player:FindFirstChild("Stats")
 		local upgrades = stats and stats:FindFirstChild("Upgrades")
@@ -253,24 +273,25 @@ function GearController:Start()
 		end
 	end)
 
-	self._player.CharacterAdded:Connect(function(character)
+	local function bindCharacter(character: Model)
 		character.ChildAdded:Connect(function(child)
 			if child:IsA("Tool") then
 				self:_onToolEquipped(child)
 			end
 		end)
-		-- Fixed ChildRemoving -> ChildRemoved
 		character.ChildRemoved:Connect(function(child)
 			if child:IsA("Tool") then
 				self:_onToolUnequipped(child)
 			end
 		end)
-	end)
-
-	if self._player.Character then
-		for _, child in ipairs(self._player.Character:GetChildren()) do
+		for _, child in ipairs(character:GetChildren()) do
 			if child:IsA("Tool") then self:_onToolEquipped(child) end
 		end
+	end
+
+	self._player.CharacterAdded:Connect(bindCharacter)
+	if self._player.Character then
+		bindCharacter(self._player.Character)
 	end
 end
 

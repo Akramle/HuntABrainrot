@@ -352,6 +352,11 @@ function EnemyService:_onEnemyTouched(npc, hit)
     targetHumanoid:TakeDamage(targetHumanoid.MaxHealth * state.config.DAMAGE_PERCENTAGE)
     self:_applyRagdoll(character, 1)
 
+    local soundService = self._runtime:GetService("SoundService")
+    if soundService then
+      soundService:PlayForPlayer(player, "EnemyHit")
+    end
+
     -- NEW: Instead of clearing inventory, drop carried animal
     local animalService = self._runtime:GetService("AnimalService")
     if animalService then

@@ -364,12 +364,19 @@ function AdminService:ExecuteCommand(admin: Player, command: string, args: {stri
 		if leaderstats then
 			local bucks = leaderstats:FindFirstChild("Bucks")
 			if bucks then bucks.Value = 0 end
+			local rebirths = leaderstats:FindFirstChild("Rebirths")
+			if rebirths then rebirths.Value = 0 end
+			local diamonds = leaderstats:FindFirstChild("Diamonds")
+			if diamonds then diamonds.Value = 0 end
 		end
 		
 		local stats = target:FindFirstChild("Stats")
 		if stats then
 			local multiplier = stats:FindFirstChild("Multiplier")
 			if multiplier then multiplier.Value = 1 end
+			
+			local baseUpgrade = stats:FindFirstChild("BaseUpgrade")
+			if baseUpgrade then baseUpgrade.Value = 1 end
 			
 			local swords = stats:FindFirstChild("Swords")
 			if swords then
@@ -402,6 +409,12 @@ function AdminService:ExecuteCommand(admin: Player, command: string, args: {stri
 				plains.Name = "Plains"
 				plains.Value = true
 				plains.Parent = unlockedAreas
+			end
+
+			local merchant = stats:FindFirstChild("Merchant")
+			if merchant then
+				local sellAll = merchant:FindFirstChild("SellAllUnlocked")
+				if sellAll then sellAll.Value = false end
 			end
 		end
 		

@@ -113,13 +113,10 @@ function GearService:Start()
 				local newGear = gearTemplate:Clone()
 				newGear.Parent = player:FindFirstChild("Backpack") or player:WaitForChild("Backpack")
 				
-				-- Play sound
-				self._runtime:GetService("SoundService"):PlayForPlayer(player, "AnimalUpgrade", {randomPitch = true})
-
-				-- Trigger effects
+				-- Trigger PlayerUpgrade effect
 				local effectsRemote = self._runtime.Remotes:GetEffectsRemote()
 				if effectsRemote then
-					effectsRemote:FireClient(player, "ConfettiBurst", { amount = 100 })
+					effectsRemote:FireClient(player, self._config.Effects.Names.PlayerUpgrade, {})
 				end
 				
 				self._runtime:GetService("NotificationService"):NotifyPlayer(player, "Purchased " .. gearName .. "!", "Success")

@@ -26,6 +26,7 @@ function InventoryController:Start()
   local carryRemote = self._runtime.Remotes:GetCarryAnimalRemote()
   local GameConfig = self._config
   local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NumberFormatter"))
+  local ViewportHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ViewportHelper"))
 
   local player = Players.LocalPlayer
   local pGui = player:WaitForChild("PlayerGui")
@@ -70,14 +71,7 @@ function InventoryController:Start()
     Stroke_Thickness   = 4,                              -- Universal thick borders
 
     -- Simulator Rarity Settings (Top and Bottom colors for gradients)
-    RaritySettings = {
-      Common    = { Top = Color3.fromRGB(200, 200, 200), Bottom = Color3.fromRGB(130, 130, 130), Thickness = 1 },
-      Uncommon  = { Top = Color3.fromRGB(100, 255, 100), Bottom = Color3.fromRGB(0, 180, 0),     Thickness = 1 },
-      Rare      = { Top = Color3.fromRGB(0, 220, 255),   Bottom = Color3.fromRGB(0, 120, 200),   Thickness = 1 },
-      Legendary = { Top = Color3.fromRGB(255, 220, 50),  Bottom = Color3.fromRGB(200, 140, 0),   Thickness = 2 },
-      Mythical  = { Top = Color3.fromRGB(255, 60, 60),   Bottom = Color3.fromRGB(180, 0, 0),     Thickness = 2 },
-      Devine    = { Top = Color3.fromRGB(180, 50, 255),  Bottom = Color3.fromRGB(100, 0, 180),   Thickness = 3 }
-    },
+    RaritySettings = GameConfig.RaritySettings,
 
     HotbarHeightScale  = 0.11,
     HotbarWidthScale   = 0.8,
@@ -206,246 +200,10 @@ function InventoryController:Start()
     return nil
   end
 
-  local function playViewportIdleAnimation(displayClone, sourceTool)
-    local idleAnimationId = nil
-    if sourceTool then
-      local sourceIdle = sourceTool:GetAttribute("IdleAnimationId")
-      if typeof(sourceIdle) == "string" and sourceIdle ~= "" then
-        idleAnimationId = sourceIdle
-      end
-    end
-    if idleAnimationId == nil then
-      local cloneIdle = displayClone:GetAttribute("IdleAnimationId")
-      if typeof(cloneIdle) == "string" and cloneIdle ~= "" then
-        idleAnimationId = cloneIdle
-      end
-    end
-    if idleAnimationId == nil then
-      local visualModel = displayClone:FindFirstChildWhichIsA("Model")
-      local visualIdle = visualModel and visualModel:GetAttribute("IdleAnimationId")
-      if typeof(visualIdle) == "string" and visualIdle ~= "" then
-        idleAnimationId = visualIdle
-      end
-    end
-    if typeof(idleAnimationId) ~= "string" or idleAnimationId == "" then
-      return
-    end
-
-    local animationController = displayClone:FindFirstChild("AnimationController", true)
-    if animationController == nil then
-      return
-    end
-
-    local animator = animationController:FindFirstChildOfClass("Animator")
-    if animator == nil then
-      animator = Instance.new("Animator")
-      animator.Parent = animationController
-    end
-
-    local animation = Instance.new("Animation")
-    animation.AnimationId = idleAnimationId
-    animation.Parent = displayClone
-
-    local track = animator:LoadAnimation(animation)
-    track.Looped = true
-    track:Play()
-  end
-
-  local function getViewportParts(root)
-    local parts = {}
-    if root:IsA("BasePart") then
-      table.insert(parts, root)
-    end
-    for _, descendant in ipairs(root:GetDescendants()) do
-      if descendant:IsA("BasePart") then
-        table.insert(parts, descendant)
-      end
-    end
-    return parts
-  end
-
-  local function getInstancePivot(instance)
-    if instance:IsA("Model") then
-      return instance:GetPivot()
-    elseif instance:IsA("BasePart") then
-      return instance.CFrame
-    end
-
-    return nil
-  end
-
-  local function pivotInstance(instance, targetCFrame)
-    if instance:IsA("Model") then
-      instance:PivotTo(targetCFrame)
-    elseif instance:IsA("BasePart") then
-      instance.CFrame = targetCFrame
-    end
-  end
-
-  local function alignViewportDisplay(displayClone, sourceTool, sourceVisual)
-    if sourceTool == nil then
-      return
-    end
-
-    local displayPivot = getInstancePivot(displayClone)
-    if displayPivot == nil then
-      return
-    end
-
-    if sourceTool:IsA("Configuration") and not CollectionService:HasTag(sourceTool, "Animal") then
-      local gripRotation = CFrame.new()
-      local gripValue = sourceTool:FindFirstChild("Grip")
-      if gripValue and gripValue:IsA("CFrameValue") then
-        local gripCFrame = gripValue.Value
-        gripRotation = (gripCFrame - gripCFrame.Position):Inverse()
-      end
-
-      local modelRotX = tonumber(sourceTool:GetAttribute("ViewportModelRotX")) or 0
-      local modelRotY = tonumber(sourceTool:GetAttribute("ViewportModelRotY")) or 90
-      local modelRotZ = tonumber(sourceTool:GetAttribute("ViewportModelRotZ")) or 0
-      local previewRotation = gripRotation * CFrame.Angles(math.rad(modelRotX), math.rad(modelRotY), math.rad(modelRotZ))
-      pivotInstance(displayClone, CFrame.new(displayPivot.Position) * previewRotation)
-      return
-    end
-
-    if sourceVisual == nil then
-      return
-    end
-    if not CollectionService:HasTag(sourceTool, "Animal") then
-      return
-    end
-
-    local handle = sourceTool:FindFirstChild("Handle")
-    if handle == nil or not handle:IsA("BasePart") then
-      return
-    end
-
-    local sourcePivot = getInstancePivot(sourceVisual)
-    if sourcePivot == nil then
-      return
-    end
-
-    local sourceRotation = sourcePivot - sourcePivot.Position
-    local handleRotation = handle.CFrame - handle.CFrame.Position
-    local visualFromHandle = handleRotation:ToObjectSpace(sourceRotation)
-    local previewRotation = visualFromHandle
-    pivotInstance(displayClone, CFrame.new(displayPivot.Position) * previewRotation)
-  end
-
-  local function resolveViewportDisplayClone(tool)
-    local sourceVisual = tool:FindFirstChild(tool.Name)
-    if sourceVisual and (sourceVisual:IsA("Model") or sourceVisual:IsA("BasePart")) then
-      return sourceVisual:Clone(), sourceVisual
-    end
-
-    if tool:IsA("Configuration") then
-      local handleVisual = tool:FindFirstChild("Handle", true)
-      if handleVisual and (handleVisual:IsA("Model") or handleVisual:IsA("BasePart")) then
-        return handleVisual:Clone(), handleVisual
-      end
-
-      for _, descendant in ipairs(tool:GetDescendants()) do
-        if descendant:IsA("Model") or descendant:IsA("BasePart") then
-          return descendant:Clone(), descendant
-        end
-      end
-    end
-
-    return tool:Clone(), nil
-  end
-
   local function buildViewport(tool, parentFrame)
-    if not tool:FindFirstChildWhichIsA("BasePart", true) then return nil end
-
-    local viewport = Instance.new("ViewportFrame")
-    viewport.Size = UDim2.fromScale(1, 1)
-    viewport.BackgroundTransparency = 1
-    viewport.Ambient = Color3.new(1, 1, 1)
-    viewport.LightColor = Color3.new(1, 1, 1)
-    viewport.Parent = parentFrame
-
-    local worldModel = Instance.new("WorldModel")
-    worldModel.Parent = viewport
-
-    local renderModel = Instance.new("Model")
-    renderModel.Name = "RenderModel"
-    renderModel.Parent = worldModel
-
-    local displayClone, sourceVisual = resolveViewportDisplayClone(tool)
-    displayClone.Parent = renderModel
-
-    for _, child in ipairs(displayClone:GetDescendants()) do
-      if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("Sound") then
-        child:Destroy()
-      end
-    end
-
-    alignViewportDisplay(displayClone, tool, sourceVisual)
-
-    local renderPivot = renderModel:GetPivot()
-    -- Recenter without forcing identity rotation, so facing corrections stay intact.
-    renderModel:PivotTo(renderPivot - renderPivot.Position)
-
-    for _, part in ipairs(getViewportParts(displayClone)) do
-      part.CanCollide = false
-      part.CanTouch = false
-      part.CanQuery = false
-    end
-
-    playViewportIdleAnimation(displayClone, tool)
-
-    local highlight = Instance.new("Highlight")
-    highlight.FillTransparency = 1
-    highlight.OutlineColor = CONFIG.Color_Outline
-    highlight.OutlineTransparency = 0
-    highlight.Parent = renderModel
-
-    local camera = Instance.new("Camera")
-    viewport.CurrentCamera = camera
-    camera.Parent = viewport
-
-    local modelCFrame, modelSize = renderModel:GetBoundingBox()
-    local maxDim = math.max(modelSize.X, modelSize.Y, modelSize.Z)
-
-    for _, part in ipairs(getViewportParts(displayClone)) do
-      local mesh = part:FindFirstChildWhichIsA("SpecialMesh")
-      if mesh then
-        local trueSizeX = part.Size.X * mesh.Scale.X
-        local trueSizeY = part.Size.Y * mesh.Scale.Y
-        local trueSizeZ = part.Size.Z * mesh.Scale.Z
-        local localMax = math.max(trueSizeX, trueSizeY, trueSizeZ)
-        if localMax > maxDim then
-          maxDim = localMax
-        end
-      end
-    end
-
-    if maxDim < 0.5 then maxDim = 1 end
-
-    local fov = math.rad(camera.FieldOfView)
-    local distance = (maxDim / 2) / math.tan(fov / 2)
-    
-    local zoomMult = tool:GetAttribute("ViewportZoom") or 1.15
-    local camPitch = tool:GetAttribute("ViewportCamX") or -15
-    local camYaw   = tool:GetAttribute("ViewportCamY") or 35
-    
-    distance = distance * zoomMult
-
-    local isAnimalTool = CollectionService:HasTag(tool, "Animal")
-    local lookAtYOffset = 0
-    if isAnimalTool then
-      lookAtYOffset = tool:GetAttribute("ViewportLookAtY")
-      if lookAtYOffset == nil then
-        lookAtYOffset = -1.7
-      end
-    end
-    local baseLookAt = modelCFrame.Position
-    local lookAt = baseLookAt + Vector3.new(0, lookAtYOffset, 0)
-    local camOffset = CFrame.Angles(math.rad(camPitch), math.rad(camYaw), 0) * Vector3.new(0, 0, distance)
-
-    camera.CFrame = CFrame.lookAt(baseLookAt + camOffset, lookAt)
-
-    return viewport
+    return ViewportHelper.BuildViewport(tool, parentFrame, {
+      OutlineColor = CONFIG.Color_Outline
+    })
   end
 
   -----------------------------------------------------------
@@ -1031,7 +789,9 @@ function InventoryController:Start()
         slotData.RenderedTool = tool
 
         for _, child in ipairs(slotData.Button:GetChildren()) do
-          if child:IsA("ViewportFrame") or child:IsA("ImageLabel") or (child:IsA("UITextSizeConstraint") and child.Name ~= "ItemName") then
+          if child:IsA("ViewportFrame") then
+            ViewportHelper.DestroyViewport(child, true)
+          elseif child:IsA("ImageLabel") or (child:IsA("UITextSizeConstraint") and child.Name ~= "ItemName") then
             child:Destroy()
           end
         end
@@ -1597,10 +1357,10 @@ function InventoryController:Start()
       end)
   end
 
-  task.spawn(function()
-      while screenGui.Parent do
+  bindInventoryButton()
+  pGui.DescendantAdded:Connect(function(desc)
+      if desc.Name == "InventoryBtn" and desc:IsA("GuiButton") then
           bindInventoryButton()
-          task.wait(2)
       end
   end)
 

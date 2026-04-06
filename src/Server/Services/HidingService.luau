@@ -115,7 +115,7 @@ function HidingService:_leaveHidingSpot(player, model, prompt)
 				player:SetAttribute("IsHiding", false) -- Set before update to allow WS to be applied
 				upgradeService:UpdatePlayerWalkspeed(player)
 			else
-				humanoid.WalkSpeed = 16 
+				humanoid.WalkSpeed = 24
 			end
 			
 			humanoid.JumpPower = 50

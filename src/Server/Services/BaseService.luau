@@ -114,13 +114,13 @@ local function findByRelativePath(root: Instance, path): Instance?
 	return current
 end
 
-local function getBaseFromDescendant(descendant: Instance, bases: Folder): Folder?
+local function getBaseFromDescendant(descendant: Instance, bases: Instance): Model | Folder | nil
 	local current = descendant
 	while current and current.Parent ~= bases do
 		current = current.Parent
 	end
 
-	if current and current:IsA("Folder") then
+	if current and (current:IsA("Folder") or current:IsA("Model")) then
 		return current
 	end
 
@@ -245,13 +245,13 @@ function BaseService:Init(runtime)
 	self._padEffectName = runtime.Config.Effects.Names.PadCollected
 end
 
-function BaseService:GetPlayerBase(player: Player): Folder?
+function BaseService:GetPlayerBase(player: Player): Model | Folder | nil
 	return self._playerBases[player]
 end
 
-function BaseService:_findEmptyBase(): Folder?
+function BaseService:_findEmptyBase(): Model | Folder | nil
 	for _, base in ipairs(self._bases:GetChildren()) do
-		if not base:IsA("Folder") then
+		if not base:IsA("Folder") and not base:IsA("Model") then
 			continue
 		end
 
@@ -333,7 +333,7 @@ function BaseService:_applyOwnedVisuals(player: Player, base: Folder)
 	self:_setMultiplierLabel(base, (multiplier and multiplier.Value) or 1)
 end
 
-function BaseService:_bindMultiplierUpdates(player: Player, base: Folder, connections)
+function BaseService:_bindMultiplierUpdates(player: Player, base: Model | Folder, connections)
 	task.spawn(function()
 		local stats = player:FindFirstChild("Stats") or player:WaitForChild("Stats", 5)
 		if stats == nil then
@@ -352,7 +352,7 @@ function BaseService:_bindMultiplierUpdates(player: Player, base: Folder, connec
 	end)
 end
 
-function BaseService:_applyUnownedVisuals(base: Folder)
+function BaseService:_applyUnownedVisuals(base: Model | Folder)
 	local extras = base:FindFirstChild("Extras")
 	local ceiling = base:FindFirstChild("Ceiling")
 	if extras == nil or ceiling == nil then
@@ -380,6 +380,33 @@ function BaseService:_applyUnownedVisuals(base: Folder)
 	end
 
 	self:_setMultiplierLabel(base, 1)
+end
+
+function BaseService:ResetBase(player: Player)
+	local base = self:GetPlayerBase(player)
+	if not base then return end
+
+	for levelNum = 1, 5 do
+		local levelFolder = base:FindFirstChild(tostring(levelNum))
+		if levelFolder then
+			local pads = levelFolder:FindFirstChild("Pads")
+			if pads then
+				for _, pad in ipairs(pads:GetChildren()) do
+					-- Remove animal
+					local animalFolder = pad:FindFirstChild("Animal")
+					if animalFolder then
+						animalFolder:ClearAllChildren()
+					end
+					
+					-- Reset pad state
+					self:_resetPad(pad)
+				end
+			end
+		end
+	end
+	
+	-- Refresh visual for the whole base
+	self:_applyOwnedVisuals(player, base)
 end
 
 function BaseService:_resetPad(pad: Instance)
@@ -518,7 +545,7 @@ function BaseService:_assignBase(player: Player)
 		end
 
 		local humanoid = character:WaitForChild("Humanoid")
-		humanoid.WalkSpeed = 20
+		humanoid.WalkSpeed = 24
 	end
 
 	table.insert(connections, player.CharacterAdded:Connect(onCharacterAdded))
@@ -658,7 +685,7 @@ function BaseService:_tickPads()
 		for _, pad in ipairs(CollectionService:GetTagged("Pad")) do
 			local currentGross = getPadStoredCash(pad)
 			local animal = getPadAnimal(pad)
-			if animal then
+			if animal and not animal:GetAttribute("IsLuckyBlock") then
 				local base = getBaseFromDescendant(pad, self._bases)
 				local multiplier = base and getBaseMultiplier(base, self._playerBases) or 1
 				local revenue = animal:GetAttribute("Revenue") or 0

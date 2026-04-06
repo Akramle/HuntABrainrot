@@ -92,6 +92,7 @@ function SpawnService:Init(runtime)
 	for _, rarity in ipairs(self._config.Animals.RarityOrder) do
 		self._folderReferences[rarity] = self._animalsStorage:FindFirstChild(rarity)
 	end
+	self._folderReferences["LuckyBlocks"] = self._animalsStorage:FindFirstChild("LuckyBlocks")
 
 	for _, areaName in ipairs({"Common", "Uncommon", "Rare", "Legendary", "Mythical"}) do
 		table.insert(self._areaData, {
@@ -114,7 +115,22 @@ function SpawnService:_getValidSpawnCFrame(areaPart: BasePart, animalModel: Inst
 
 		local rayParams = RaycastParams.new()
 		-- THE FIX: We MUST include the animalModel here, otherwise the floor raycast hits the animal's own back and launches it into the sky!
-		rayParams.FilterDescendantsInstances = {self._spawnAreas, self._workspaceAnimals, animalModel}
+		-- Also exclude other Animals, Enemies, and Players so they don't block the spawn raycast.
+		local filter = {self._spawnAreas, self._workspaceAnimals, animalModel}
+		
+		-- Add Enemies to filter
+		for _, enemy in ipairs(game:GetService("CollectionService"):GetTagged("Enemy")) do
+			table.insert(filter, enemy)
+		end
+		
+		-- Add Players to filter
+		for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+			if player.Character then
+				table.insert(filter, player.Character)
+			end
+		end
+
+		rayParams.FilterDescendantsInstances = filter
 		rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 		local result = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
@@ -174,16 +190,28 @@ function SpawnService:_playIdleAnimation(animal: Instance)
 	end
 
 	local animationFolder = nil
+	local targetAnimationName = animal.Name
+	if animal:GetAttribute("IsLuckyBlock") then
+		targetAnimationName = "LuckyBlock"
+	end
+
 	for _, rarityFolder in ipairs(self._animations:GetChildren()) do
-		local found = rarityFolder:FindFirstChild(animal.Name)
+		local found = rarityFolder:FindFirstChild(targetAnimationName)
 		if found then
 			animationFolder = found
+			break
+		end
+		
+		-- Fallback if the structure is just Animations > LuckyBlock
+		if targetAnimationName == "LuckyBlock" and rarityFolder.Name == "LuckyBlock" then
+			animationFolder = rarityFolder
 			break
 		end
 	end
 	
 	local idleAnimation = animationFolder and animationFolder:FindFirstChild("idle")
 	if idleAnimation and idleAnimation:IsA("Animation") then
+		animal:SetAttribute("IdleAnimationId", idleAnimation.AnimationId)
 		local track = animator:LoadAnimation(idleAnimation)
 		track:Play()
 	end
@@ -192,15 +220,60 @@ end
 function SpawnService:_spawnAnimal(data)
 	if data.part == nil or data.count >= self._config.Spawning.MaxAnimalsPerArea then return end
 
-	local rarityName = rollRarity(data.pool)
-	local sourceFolder = self._folderReferences[rarityName]
-	if sourceFolder == nil then return end
+	local sourceFolder = nil
+	local selectedTemplate = nil
+	local rarityName = ""
+	local isLuckyBlock = false
 
-	local animalChoices = sourceFolder:GetChildren()
-	if #animalChoices == 0 then return end
+	-- Check for Lucky Blocks first
+	local lbConfig = self._config.Animals.LuckyBlocks
+	if lbConfig then
+		local roll = math.random() * 100
+		local cumulative = 0
+		local lbName = nil
+		
+		-- Iterate in a specific order or just pairs (pairs order is random, but here we just need sum)
+		-- To ensure consistent rolling order, let's sort by chance (optional, but good practice if probabilities overlap)
+		-- Since we just do a flat random out of 100, any order works as long as we sum chances.
+		for name, lbData in pairs(lbConfig) do
+			cumulative += lbData.SpawnChance
+			if roll <= cumulative then
+				lbName = name
+				break
+			end
+		end
 
-	local selectedTemplate = animalChoices[math.random(1, #animalChoices)]
+		if lbName then
+			sourceFolder = self._folderReferences["LuckyBlocks"]
+			if sourceFolder then
+				selectedTemplate = sourceFolder:FindFirstChild(lbName)
+				if selectedTemplate then
+					rarityName = "LuckyBlocks"
+					isLuckyBlock = true
+				end
+			end
+		end
+	end
+
+	-- Fallback to normal animal spawn
+	if not selectedTemplate then
+		rarityName = rollRarity(data.pool)
+		sourceFolder = self._folderReferences[rarityName]
+		if sourceFolder then
+			local animalChoices = sourceFolder:GetChildren()
+			if #animalChoices > 0 then
+				selectedTemplate = animalChoices[math.random(1, #animalChoices)]
+			end
+		end
+	end
+
+	if selectedTemplate == nil then return end
+
 	local newAnimal = selectedTemplate:Clone()
+	if isLuckyBlock then
+		newAnimal:SetAttribute("IsLuckyBlock", true)
+		newAnimal:SetAttribute("Rarity", "LuckyBlocks")
+	end
 	
 	data.count += 1
 	newAnimal.Destroying:Connect(function()
@@ -230,6 +303,10 @@ function SpawnService:_spawnAnimal(data)
 	newAnimal:PivotTo(spawnCFrame)
 	local targetFolder = self._workspaceAnimals:FindFirstChild(rarityName) or self._workspaceAnimals
 	
+	-- Robust Scaling: Store base scale for client, but do NOT scale down yet
+	local baseScale = newAnimal:GetScale()
+	newAnimal:SetAttribute("BaseScale", baseScale)
+
 	-- Malevolent Mutation Chance (20%) during Shrine event
 	local eventService = self._runtime:GetService("EventService")
 	if eventService and eventService._activeEvent == "Shrine" then

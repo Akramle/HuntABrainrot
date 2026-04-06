@@ -185,6 +185,12 @@ function AnimalService:_destroyCarriedVisualFromData(data)
 		model:Destroy()
 	end
 	data.carriedModel = nil
+
+	local handle = data.carriedHandle
+	if handle and handle.Parent then
+		handle:Destroy()
+	end
+	data.carriedHandle = nil
 end
 
 function AnimalService:_destroyCarriedVisual(player: Player)
@@ -203,8 +209,10 @@ function AnimalService:_attachCarriedVisual(
 	self:_destroyCarriedVisual(player)
 
 	local character = player.Character
-	local head = character and (character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart"))
-	if head == nil or not head:IsA("BasePart") then
+	if character == nil then return end
+
+	local arm = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+	if arm == nil or not arm:IsA("BasePart") then
 		return
 	end
 
@@ -258,32 +266,47 @@ function AnimalService:_attachCarriedVisual(
 		visual.PrimaryPart = primary
 	end
 
+	-- Create a hidden Handle part to match tool behavior
+	local handle = Instance.new("Part")
+	handle.Name = "CarriedHandle"
+	handle.Size = Vector3.new(1, 1, 1)
+	handle.Transparency = 1
+	handle.Anchored = false
+	handle.CanCollide = false
+	handle.Massless = true
+	handle.Parent = character
+
 	visual.Parent = character
 
-	-- Position exactly on top of the head (no extra offset), then weld.
+	-- Position handle and visual relative to each other (180 degree rotation)
 	if visual:IsA("Model") then
-		visual:PivotTo(head.CFrame)
+		handle.CFrame = visual:GetPivot() * CFrame.Angles(0, math.rad(180), 0)
 	else
-		primary.CFrame = head.CFrame
+		handle.CFrame = primary.CFrame * CFrame.Angles(0, math.rad(180), 0)
 	end
 
-	local headTopY = head.Position.Y + (head.Size.Y * 0.5)
-	local lowestPoint = getLowestVisiblePoint(visual)
-		or getLowestAnyPoint(visual)
-		or (primary.Position - Vector3.new(0, primary.Size.Y * 0.5, 0))
-	if lowestPoint then
-		local adjustment = headTopY - lowestPoint.Y
-		if visual:IsA("Model") then
-			visual:PivotTo(visual:GetPivot() + Vector3.new(0, adjustment, 0))
-		else
-			primary.CFrame = primary.CFrame + Vector3.new(0, adjustment, 0)
-		end
+	local visualWeld = Instance.new("WeldConstraint")
+	visualWeld.Part0 = handle
+	visualWeld.Part1 = primary
+	visualWeld.Parent = handle
+
+	-- Weld handle to arm using same logic as FakeToolService
+	local armWeld = Instance.new("Weld")
+	armWeld.Name = "CarriedAnimalWeld"
+	armWeld.Part0 = arm
+	armWeld.Part1 = handle
+
+	-- Match tool Grip logic
+	armWeld.C1 = CFrame.new(-1.05, 0, 0) * CFrame.Angles(math.rad(-90), math.rad(180), 0)
+	
+	if arm.Name == "RightHand" then
+		local attachment = arm:FindFirstChild("RightGripAttachment")
+		armWeld.C0 = attachment and attachment:IsA("Attachment") and attachment.CFrame or CFrame.new(0, -0.5, 0)
+	else
+		armWeld.C0 = CFrame.new(0, -1, 0)
 	end
 
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = head
-	weld.Part1 = primary
-	weld.Parent = primary
+	armWeld.Parent = handle
 
 	-- Make it look alive.
 	self:_applyMutationVisuals(visual)
@@ -297,6 +320,7 @@ function AnimalService:_attachCarriedVisual(
 	local data = self._carriedAnimals[player]
 	if type(data) == "table" then
 		data.carriedModel = visual
+		data.carriedHandle = handle
 	end
 end
 
@@ -319,7 +343,7 @@ local function getBaseFromDescendant(descendant, bases)
 		current = current.Parent
 	end
 
-	if current and current:IsA("Folder") then
+	if current and (current:IsA("Folder") or current:IsA("Model")) then
 		return current
 	end
 
@@ -623,7 +647,7 @@ function AnimalService:_claimPlacedAnimal(player, clone, placePart, placer, prom
 		)
 		clone:Destroy()
 
-		local full = placePart:FindFirstChild("Full")
+		local full = placePart:FindFirstChild("Full") or (placer and placer:FindFirstChild("Full"))
 		if full and full:IsA("BoolValue") then
 			full.Value = false
 		end
@@ -719,11 +743,21 @@ function AnimalService:_playIdleAnimation(animal: Instance)
 		animator.Parent = animationController
 	end
 
+	local targetAnimationName = animal.Name
+	if animal:GetAttribute("IsLuckyBlock") then
+		targetAnimationName = "LuckyBlock"
+	end
+
 	local animationFolder = nil
 	for _, rarityFolder in ipairs(self._animations:GetChildren()) do
-		local found = rarityFolder:FindFirstChild(animal.Name)
+		local found = rarityFolder:FindFirstChild(targetAnimationName)
 		if found then
 			animationFolder = found
+			break
+		end
+		
+		if targetAnimationName == "LuckyBlock" and rarityFolder.Name == "LuckyBlock" then
+			animationFolder = rarityFolder
 			break
 		end
 	end
@@ -732,6 +766,8 @@ function AnimalService:_playIdleAnimation(animal: Instance)
 	if idleAnimation == nil or not idleAnimation:IsA("Animation") then
 		return
 	end
+
+	animal:SetAttribute("IdleAnimationId", idleAnimation.AnimationId)
 
 	for _, playingTrack in ipairs(animator:GetPlayingAnimationTracks()) do
 		local animation = playingTrack.Animation
@@ -1510,12 +1546,34 @@ function AnimalService:_attachAnimalTag(animal, rarity)
 end
 
 function AnimalService:_togglePlayerPlacers(player, isEquipping)
+	local stats = player:FindFirstChild("Stats")
+	local baseLevelVal = stats and stats:FindFirstChild("BaseLevel")
+	local baseLevel = baseLevelVal and baseLevelVal.Value or 1
+
 	for _, placer in ipairs(CollectionService:GetTagged("Placer")) do
 		local base = getBaseFromDescendant(placer, self._bases)
 		if base and base.Name == player.Name then
 			local placePart = placer.Parent
+			local pad = placePart and placePart.Parent
+			
+			-- Check if the pad is on a locked level
+			local isLocked = false
+			if pad then
+				local levelFolder = pad.Parent and pad.Parent.Parent
+				if levelFolder then
+					local padLevel = tonumber(levelFolder.Name)
+					if padLevel and padLevel > baseLevel then
+						isLocked = true
+					end
+				end
+			end
+
 			local full = placePart and placePart:FindFirstChild("Full")
-			placer.Enabled = isEquipping and not (full and full:IsA("BoolValue") and full.Value)
+			if isLocked then
+				placer.Enabled = false
+			else
+				placer.Enabled = isEquipping and not (full and full:IsA("BoolValue") and full.Value)
+			end
 		end
 	end
 end
@@ -1545,10 +1603,20 @@ function AnimalService:_buildAnimalTool(player, animalName, animalRarity, savedA
 
 	local idleAnimationId = nil
 	local animationFolder = nil
+	
+	local targetAnimationName = animalName
+	if tool:GetAttribute("IsLuckyBlock") then
+		targetAnimationName = "LuckyBlock"
+	end
+	
 	for _, rarityFolder in ipairs(self._animations:GetChildren()) do
-		local found = rarityFolder:FindFirstChild(animalName)
+		local found = rarityFolder:FindFirstChild(targetAnimationName)
 		if found then
 			animationFolder = found
+			break
+		end
+		if targetAnimationName == "LuckyBlock" and rarityFolder.Name == "LuckyBlock" then
+			animationFolder = rarityFolder
 			break
 		end
 	end
@@ -1691,6 +1759,10 @@ function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedA
 		end
 	end
 
+	-- Robust Scaling: Store intended scale
+	local baseScale = droppable:GetScale()
+	droppable:SetAttribute("BaseScale", baseScale)
+
 	droppable.Parent = self._dropsFolder
 
 	-- If we already snapped to a floor hit point, do not add legacy Y-offset.
@@ -1700,6 +1772,12 @@ function AnimalService:_dropAnimal(animalName, animalRarity, animalPivot, savedA
 
 	-- Iterative snapping loop from SpawnService logic
 	local ignore = {self._dropsFolder, droppable}
+	
+	-- Exclude Enemies from drop raycast
+	for _, enemy in ipairs(CollectionService:GetTagged("Enemy")) do
+		table.insert(ignore, enemy)
+	end
+
 	if type(dropOptions) == "table" and type(dropOptions.ignoreInstances) == "table" then
 		for _, instance in ipairs(dropOptions.ignoreInstances) do
 			if typeof(instance) == "Instance" then
@@ -2021,6 +2099,12 @@ function AnimalService:DropCarriedAnimal(player: Player)
 		local origin = (hrp and hrp.Position) or (data.lastPosition or Vector3.zero)
 		local ignore = {self._dropsFolder}
 		if char then table.insert(ignore, char) end
+		
+		-- Exclude Enemies
+		for _, enemy in ipairs(CollectionService:GetTagged("Enemy")) do
+			table.insert(ignore, enemy)
+		end
+
 		local hit = raycastDownToVisiblePart(origin + Vector3.new(0, 6, 0), 500, ignore)
 		if hit then
 			pivot = CFrame.new(hit.Position) * (pivot - pivot.Position)
@@ -2084,6 +2168,7 @@ function AnimalService:_setupPlacedAnimalOptions(clone, base, pad, placePart, pl
 	grabWeld.Parent = grabPart
 
 	local grabPrompt = Instance.new("ProximityPrompt")
+	grabPrompt.Name = "GrabPrompt"
 	grabPrompt.ActionText = "Grab"
 	grabPrompt.ObjectText = clone.Name
 	grabPrompt.KeyboardKeyCode = Enum.KeyCode.F
@@ -2093,40 +2178,108 @@ function AnimalService:_setupPlacedAnimalOptions(clone, base, pad, placePart, pl
 	grabPrompt:SetAttribute("PromptActive", true)
 	grabPrompt.Parent = grabPart
 
-	local upgradePart = Instance.new("Part")
-	upgradePart.Name = "UpgradePart"
-	upgradePart.Size = Vector3.new(1.5, 1.5, 1.5)
-	upgradePart.Transparency = 1
-	upgradePart.CanCollide = false
-	upgradePart.Massless = true
-	upgradePart.CFrame = clone:GetPivot() * CFrame.new(0, 5.5, 0)
-	upgradePart.Parent = clone
+	local animalPrompts = {grabPrompt}
 
-	local upgradeWeld = Instance.new("WeldConstraint")
-	upgradeWeld.Part0 = primaryPart
-	upgradeWeld.Part1 = upgradePart
-	upgradeWeld.Parent = upgradePart
+	if not clone:GetAttribute("IsLuckyBlock") then
+		local upgradePart = Instance.new("Part")
+		upgradePart.Name = "UpgradePart"
+		upgradePart.Size = Vector3.new(1.5, 1.5, 1.5)
+		upgradePart.Transparency = 1
+		upgradePart.CanCollide = false
+		upgradePart.Massless = true
+		upgradePart.CFrame = clone:GetPivot() * CFrame.new(0, 5.5, 0)
+		upgradePart.Parent = clone
 
-	local upgradePrompt = Instance.new("ProximityPrompt")
-	upgradePrompt.ActionText = "Upgrade"
-	upgradePrompt.ObjectText = "-$" .. NumberFormatter:Format(clone:GetAttribute("UpgradeCost") or 0, "Letters")
-	upgradePrompt.KeyboardKeyCode = Enum.KeyCode.E
-	upgradePrompt.HoldDuration = 0.5
-	upgradePrompt.MaxActivationDistance = 8
-	upgradePrompt:SetAttribute("VisibilityRole", "OwnerOnly")
-	upgradePrompt:SetAttribute("PromptActive", true)
-	upgradePrompt.Parent = upgradePart
+		local upgradeWeld = Instance.new("WeldConstraint")
+		upgradeWeld.Part0 = primaryPart
+		upgradeWeld.Part1 = upgradePart
+		upgradeWeld.Parent = upgradePart
 
-	local stealPrompt = Instance.new("ProximityPrompt")
-	stealPrompt.ActionText = "Steal"
-	stealPrompt.ObjectText = clone.Name
-	stealPrompt.HoldDuration = 0.5
-	stealPrompt.MaxActivationDistance = 8
-	stealPrompt:SetAttribute("VisibilityRole", "VisitorOnly")
-	stealPrompt:SetAttribute("PromptActive", true)
-	stealPrompt.Parent = grabPart
+		local upgradePrompt = Instance.new("ProximityPrompt")
+		upgradePrompt.Name = "UpgradePrompt"
+		upgradePrompt.ActionText = "Upgrade"
+		upgradePrompt.ObjectText = "-$" .. NumberFormatter:Format(clone:GetAttribute("UpgradeCost") or 0, "Letters")
+		upgradePrompt.KeyboardKeyCode = Enum.KeyCode.E
+		upgradePrompt.HoldDuration = 0.5
+		upgradePrompt.MaxActivationDistance = 8
+		upgradePrompt:SetAttribute("VisibilityRole", "OwnerOnly")
+		upgradePrompt:SetAttribute("PromptActive", true)
+		upgradePrompt.Parent = upgradePart
 
-	local animalPrompts = {grabPrompt, upgradePrompt, stealPrompt}
+		local stealPrompt = Instance.new("ProximityPrompt")
+		stealPrompt.Name = "StealPrompt"
+		stealPrompt.ActionText = "Steal"
+		stealPrompt.ObjectText = clone.Name
+		stealPrompt.HoldDuration = 0.5
+		stealPrompt.MaxActivationDistance = 8
+		stealPrompt:SetAttribute("VisibilityRole", "VisitorOnly")
+		stealPrompt:SetAttribute("PromptActive", true)
+		stealPrompt.Parent = grabPart
+
+		table.insert(animalPrompts, upgradePrompt)
+		table.insert(animalPrompts, stealPrompt)
+
+		stealPrompt.Triggered:Connect(function(player)
+			if player.Name == base.Name then
+				return
+			end
+			if self._pendingSteals[player.UserId] ~= nil then
+				return
+			end
+			if self:_findPendingStealByAnimal(clone) ~= nil then
+				return
+			end
+
+			local ownerPlayer = Players:FindFirstChild(base.Name)
+
+			self._pendingSteals[player.UserId] = {
+				animal = clone,
+				placePart = placePart,
+				placer = placer,
+				prompts = animalPrompts,
+				ownerUserId = if ownerPlayer and ownerPlayer:IsA("Player") then ownerPlayer.UserId else nil,
+				padPath = getRelativePath(base, pad),
+				animalData = {
+					name = clone.Name,
+					rarity = clone:GetAttribute("Rarity"),
+					attributes = clone:GetAttributes(),
+					tags = CollectionService:GetTags(clone),
+				},
+			}
+			self:_setPlacedAnimalPromptState(animalPrompts, false)
+			self._stealPromptRemote:FireClient(player, "PromptPurchase", self._config.Monetization.StealAnimalProductId)
+		end)
+
+		upgradePrompt.Triggered:Connect(function(player)
+			if player.Name ~= base.Name then
+				return
+			end
+
+			local leaderstats = player:FindFirstChild("leaderstats")
+			local bucks = leaderstats and leaderstats:FindFirstChild("Bucks")
+			local currentUpgradeCost = clone:GetAttribute("UpgradeCost") or 0
+			if bucks == nil or not bucks:IsA("IntValue") or bucks.Value < currentUpgradeCost then
+				return
+			end
+
+			bucks.Value -= currentUpgradeCost
+
+			local currentUpgradeLevel = clone:GetAttribute("UpgradeLevel") or 0
+			clone:SetAttribute("UpgradeLevel", currentUpgradeLevel + 1)
+
+			self:_recalculateAnimalStats(clone)
+			self:_refreshAnimalTag(clone)
+
+			local worldPart = getPrimaryPart(clone)
+			if worldPart then
+				self._effects:EmitToPlayer(player, self._config.Effects.Names.AnimalUpgrade, {
+					animal = clone,
+					position = worldPart.Position,
+				})
+				self._sounds:PlayForPlayer(player, "AnimalUpgrade", { randomPitch = true })
+			end
+		end)
+	end
 
 	grabPrompt.Triggered:Connect(function(player)
 		if player.Name ~= base.Name then
@@ -2137,66 +2290,6 @@ function AnimalService:_setupPlacedAnimalOptions(clone, base, pad, placePart, pl
 		end
 
 		self:_claimPlacedAnimal(player, clone, placePart, placer, animalPrompts)
-	end)
-
-	stealPrompt.Triggered:Connect(function(player)
-		if player.Name == base.Name then
-			return
-		end
-		if self._pendingSteals[player.UserId] ~= nil then
-			return
-		end
-		if self:_findPendingStealByAnimal(clone) ~= nil then
-			return
-		end
-
-		local ownerPlayer = Players:FindFirstChild(base.Name)
-
-		self._pendingSteals[player.UserId] = {
-			animal = clone,
-			placePart = placePart,
-			placer = placer,
-			prompts = animalPrompts,
-			ownerUserId = if ownerPlayer and ownerPlayer:IsA("Player") then ownerPlayer.UserId else nil,
-			padPath = getRelativePath(base, pad),
-			animalData = {
-				name = clone.Name,
-				rarity = clone:GetAttribute("Rarity"),
-				attributes = clone:GetAttributes(),
-				tags = CollectionService:GetTags(clone),
-			},
-		}
-		self:_setPlacedAnimalPromptState(animalPrompts, false)
-		self._stealPromptRemote:FireClient(player, "PromptPurchase", self._config.Monetization.StealAnimalProductId)
-	end)
-
-	upgradePrompt.Triggered:Connect(function(player)
-		if player.Name ~= base.Name then
-			return
-		end
-
-		local leaderstats = player:FindFirstChild("leaderstats")
-		local bucks = leaderstats and leaderstats:FindFirstChild("Bucks")
-		local currentUpgradeCost = clone:GetAttribute("UpgradeCost") or 0
-		if bucks == nil or not bucks:IsA("IntValue") or bucks.Value < currentUpgradeCost then
-			return
-		end
-
-		bucks.Value -= currentUpgradeCost
-
-		local currentUpgradeLevel = clone:GetAttribute("UpgradeLevel") or 0
-		clone:SetAttribute("UpgradeLevel", currentUpgradeLevel + 1)
-
-		self:_recalculateAnimalStats(clone)
-		self:_refreshAnimalTag(clone)
-
-		local worldPart = getPrimaryPart(clone)		if worldPart then
-			self._effects:EmitToPlayer(player, self._config.Effects.Names.AnimalUpgrade, {
-				animal = clone,
-				position = worldPart.Position,
-			})
-			self._sounds:PlayForPlayer(player, "AnimalUpgrade", { randomPitch = true })
-		end
 	end)
 
 	clone.Destroying:Connect(function()
@@ -2263,9 +2356,20 @@ function AnimalService:_createPlacedAnimal(base, pad, animalData, placePartOverr
 		if clone:GetAttribute("Health") == nil then
 			clone:SetAttribute("Health", health)
 		end
+
+		-- Ensure BaseRevenue is rolled if it doesn't exist (e.g. rolled from Lucky Block)
+		if clone:GetAttribute("BaseRevenue") == nil then
+			local baseRevenue = getRandomInRange(rarityStats.Revenue)
+			clone:SetAttribute("BaseRevenue", baseRevenue)
+		end
 	end
 	
 	applyCollectionTags(clone, animalData.tags)
+
+	-- Robust Scaling: Store the intended base scale for the client, but do NOT scale down here
+	-- Scaling on server during replication causes 'tiny parts' on high-ping clients
+	local baseScale = clone:GetScale()
+	clone:SetAttribute("BaseScale", baseScale)
 
 	clone:PivotTo(placePart.CFrame)
 	local animalFolder = pad:FindFirstChild("Animal")
@@ -2286,9 +2390,11 @@ function AnimalService:_createPlacedAnimal(base, pad, animalData, placePartOverr
 
 	self:_playIdleAnimation(clone)
 
-	self:_attachAnimalTag(clone, resolvedRarity)
-	self:_applyMutationVisuals(clone)
-	self:_refreshAnimalTag(clone)
+	if not clone:GetAttribute("IsLuckyBlock") then
+		self:_attachAnimalTag(clone, resolvedRarity)
+		self:_applyMutationVisuals(clone)
+		self:_refreshAnimalTag(clone)
+	end
 
 	-- Apply active event effects/mutations immediately if an event is running
 	local eventService = self._runtime:GetService("EventService")
@@ -2296,7 +2402,7 @@ function AnimalService:_createPlacedAnimal(base, pad, animalData, placePartOverr
 		eventService:ApplyActiveEventToAnimal(clone)
 	end
 
-	local full = placePart:FindFirstChild("Full")
+	local full = placePart:FindFirstChild("Full") or (placerPrompt and placerPrompt:FindFirstChild("Full"))
 	if full and full:IsA("BoolValue") then
 		full.Value = true
 	end
@@ -2464,6 +2570,19 @@ function AnimalService:_bindPlacer(placer)
 		end
 		if full and full:IsA("BoolValue") and full.Value then
 			return
+		end
+		
+		-- Check if pad is on a locked level
+		local pad = placePart and placePart.Parent
+		local levelFolder = pad and pad.Parent and pad.Parent.Parent
+		if levelFolder then
+			local padLevel = tonumber(levelFolder.Name)
+			local stats = player:FindFirstChild("Stats")
+			local baseLevelVal = stats and stats:FindFirstChild("BaseLevel")
+			local baseLevel = baseLevelVal and baseLevelVal.Value or 1
+			if padLevel and padLevel > baseLevel then
+				return
+			end
 		end
 
 		local character = player.Character
@@ -2747,6 +2866,32 @@ function AnimalService:_handleAnimalDeath(animal, player)
 			})
 		end
 		self._sounds:PlayOnServer("AnimalDeath")
+		
+		local animalSounds = game:GetService("ServerStorage"):FindFirstChild("Assets") and game:GetService("ServerStorage").Assets:FindFirstChild("AnimalSounds")
+		if animalSounds then
+			local soundName = animal.Name
+			if animal:GetAttribute("IsLuckyBlock") then
+				soundName = "Lucky Block"
+			end
+
+			local specificSound = animalSounds:FindFirstChild(soundName)
+			if specificSound and specificSound:IsA("Sound") then
+				local soundPart = Instance.new("Part")
+				soundPart.Name = "DeathSoundPart_" .. soundName
+				soundPart.Size = Vector3.new(0.1, 0.1, 0.1)
+				soundPart.Transparency = 1
+				soundPart.CanCollide = false
+				soundPart.Anchored = true
+				soundPart.CFrame = worldPart.CFrame
+				soundPart.Parent = game:GetService("Workspace")
+				
+				local soundClone = specificSound:Clone()
+				soundClone.Parent = soundPart
+				soundClone:Play()
+				
+				game:GetService("Debris"):AddItem(soundPart, math.max(2, soundClone.TimeLength + 0.5))
+			end
+		end
 	end
 
 	task.delay(0.1, function()

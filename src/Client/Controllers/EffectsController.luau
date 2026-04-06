@@ -32,25 +32,88 @@ function EffectsController:Init(runtime)
 	self._activeScaleDrivers = setmetatable({}, {__mode = "k"})
 	self._activePartTweens = setmetatable({}, {__mode = "k"})
 	self._dropAnimations = setmetatable({}, {__mode = "k"})
+	self._dropSpinConnection = nil
+	self._shakeConnection = nil
+	self._shakeUntil = 0
+	self._shakeStrength = 0
+	self._lastRockSpawnByAnimal = setmetatable({}, {__mode = "k"})
+	self._activeFloatingTexts = 0
+	self._maxFloatingTexts = 24
+	self._lastFloatingTextAt = 0
+	self._lastDeliveredEffectAt = 0
+	self._lastAnimalHitFxAt = 0
+end
+
+function EffectsController:_ensureDropSpinLoop()
+	if self._dropSpinConnection and self._dropSpinConnection.Connected then
+		return
+	end
+
+	self._dropSpinConnection = RunService.Heartbeat:Connect(function(dt)
+		local hasDrops = false
+		for drop, spinSpeed in pairs(self._dropAnimations) do
+			if drop and drop.Parent then
+				hasDrops = true
+				drop:PivotTo(drop:GetPivot() * CFrame.Angles(0, math.rad(spinSpeed * dt), 0))
+			else
+				self._dropAnimations[drop] = nil
+			end
+		end
+
+		if not hasDrops and self._dropSpinConnection then
+			self._dropSpinConnection:Disconnect()
+			self._dropSpinConnection = nil
+		end
+	end)
 end
 
 function EffectsController:_shakeCamera(intensity, duration)
 	local camera = Workspace.CurrentCamera
 	if not camera then return end
-	
-	local startTime = os.clock()
-	task.spawn(function()
-		while os.clock() - startTime < duration do
-			local elapsed = os.clock() - startTime
-			local fade = 1 - (elapsed / duration)
-			local offset = Vector3.new(
-				(math.random() - 0.5) * 2 * intensity * fade,
-				(math.random() - 0.5) * 2 * intensity * fade,
-				(math.random() - 0.5) * 2 * intensity * fade
-			)
-			camera.CFrame = camera.CFrame * CFrame.new(offset)
-			RunService.RenderStepped:Wait()
+
+	local now = os.clock()
+	self._shakeUntil = math.max(self._shakeUntil, now + duration)
+	self._shakeStrength = math.max(self._shakeStrength, intensity)
+
+	if self._shakeConnection and self._shakeConnection.Connected then
+		return
+	end
+
+	self._shakeConnection = RunService.RenderStepped:Connect(function(dt)
+		if camera ~= Workspace.CurrentCamera then
+			camera = Workspace.CurrentCamera
+			if not camera then
+				if self._shakeConnection then
+					self._shakeConnection:Disconnect()
+					self._shakeConnection = nil
+				end
+				self._shakeStrength = 0
+				self._shakeUntil = 0
+				return
+			end
 		end
+
+		local t = os.clock()
+		if t >= self._shakeUntil or self._shakeStrength <= 0.001 then
+			if self._shakeConnection then
+				self._shakeConnection:Disconnect()
+				self._shakeConnection = nil
+			end
+			self._shakeStrength = 0
+			return
+		end
+
+		local fade = math.clamp((self._shakeUntil - t) / 0.2, 0, 1)
+		local currentIntensity = self._shakeStrength * fade
+		local offset = Vector3.new(
+			(math.random() - 0.5) * 2 * currentIntensity,
+			(math.random() - 0.5) * 2 * currentIntensity,
+			(math.random() - 0.5) * 2 * currentIntensity
+		)
+		camera.CFrame = camera.CFrame * CFrame.new(offset)
+
+		local decay = math.max(0, 1 - (dt * 10))
+		self._shakeStrength *= decay
 	end)
 end
 
@@ -93,6 +156,16 @@ function EffectsController:_flashHighlight(target, color, startingTransparency, 
 end
 
 function EffectsController:_spawnFloatingText(worldPosition, text, textColor, strokeColor, size, riseHeight, lifetime, extraOptions)
+	local now = os.clock()
+	if self._activeFloatingTexts >= self._maxFloatingTexts then
+		return
+	end
+	if (now - self._lastFloatingTextAt) < 0.02 then
+		return
+	end
+	self._lastFloatingTextAt = now
+	self._activeFloatingTexts += 1
+
 	local attachment = Instance.new("Attachment")
 	attachment.Parent = Workspace.Terrain
 	
@@ -169,6 +242,9 @@ function EffectsController:_spawnFloatingText(worldPosition, text, textColor, st
 	end)
 
 	Debris:AddItem(attachment, lifetime + 0.1)
+	task.delay(lifetime + 0.15, function()
+		self._activeFloatingTexts = math.max(0, self._activeFloatingTexts - 1)
+	end)
 end
 
 function EffectsController:_playModelScaleSequence(model, steps, options)
@@ -176,7 +252,7 @@ function EffectsController:_playModelScaleSequence(model, steps, options)
 
 	local baseScale = self._modelBaseScales[model]
 	if baseScale == nil then
-		baseScale = model:GetScale()
+		baseScale = model:GetAttribute("BaseScale") or model:GetScale()
 		if baseScale <= 0 then baseScale = 1 end
 		self._modelBaseScales[model] = baseScale
 	end
@@ -198,6 +274,14 @@ function EffectsController:_playModelScaleSequence(model, steps, options)
 	local scaleValue = Instance.new("NumberValue")
 	scaleValue.Value = baseScale * startingMult
 
+	-- REPLICATION FIX: If new parts arrive during the tween, force them to the current scale
+	-- This prevents 'giant' or 'tiny' parts caused by inconsistent local scale states
+	local descConnection = model.DescendantAdded:Connect(function(desc)
+		if desc:IsA("BasePart") then
+			model:ScaleTo(scaleValue.Value)
+		end
+	end)
+
 	local cframeValue = nil
 	local connection = nil
 	if options and options.cframeTarget then
@@ -211,9 +295,10 @@ function EffectsController:_playModelScaleSequence(model, steps, options)
 		end)
 		self._activeScaleDrivers[model] = connection
 	else
-		scaleValue.Changed:Connect(function(value)
+		connection = scaleValue.Changed:Connect(function(value)
 			if model.Parent then model:ScaleTo(value) end
 		end)
+		self._activeScaleDrivers[model] = connection
 	end
 
 	task.spawn(function()
@@ -241,6 +326,7 @@ function EffectsController:_playModelScaleSequence(model, steps, options)
 				end
 			end
 		end
+		descConnection:Disconnect()
 		scaleValue:Destroy()
 		if cframeValue then cframeValue:Destroy() end
 	end)
@@ -329,27 +415,40 @@ function EffectsController:_handleAnimalHit(payload)
 	local maxHealth = math.max(payload.maxHealth or 1, 1)
 	local target = getPrimaryPart(payload.animal)
 	local worldPosition = payload.position or (target and target.Position) or Vector3.zero
+	local now = os.clock()
+	local allowFullFx = (now - self._lastAnimalHitFxAt) >= 0.05
+	if allowFullFx then
+		self._lastAnimalHitFxAt = now
+	end
 
 	-- Juice: Camera Shake & Flash
 	local damageNum = tonumber(damage) or 0
-	local shakeIntensity = 0.15 + (math.min(damageNum / 100, 1) * 0.4)
-	self:_shakeCamera(shakeIntensity, 0.12)
-	self:_screenFlash(Color3.new(1, 1, 1), 0.1, 0.92)
+	if allowFullFx then
+		local shakeIntensity = 0.15 + (math.min(damageNum / 100, 1) * 0.4)
+		self:_shakeCamera(shakeIntensity, 0.12)
+		self:_screenFlash(Color3.new(1, 1, 1), 0.1, 0.92)
+	end
 
 	if payload.animal then
-		-- Intense Pure White Flash
-		self:_flashHighlight(payload.animal, Color3.new(1, 1, 1), 0, 0.15)
-		
-		-- Exaggerated Squish
-		if payload.animal:IsA("Model") then
-			self:_playModelScaleSequence(payload.animal, {
-				{duration = 0.04, style = Enum.EasingStyle.Quart, direction = Enum.EasingDirection.Out, scale = 0.4},
-				{duration = 0.1, style = Enum.EasingStyle.Back, direction = Enum.EasingDirection.Out, scale = 1.4},
-				{duration = 0.2, style = Enum.EasingStyle.Elastic, direction = Enum.EasingDirection.Out, scale = 1},
-			})
+		if allowFullFx then
+			-- Intense Pure White Flash
+			self:_flashHighlight(payload.animal, Color3.new(1, 1, 1), 0, 0.15)
+			
+			-- Exaggerated Squish
+			if payload.animal:IsA("Model") then
+				self:_playModelScaleSequence(payload.animal, {
+					{duration = 0.04, style = Enum.EasingStyle.Quart, direction = Enum.EasingDirection.Out, scale = 0.4},
+					{duration = 0.1, style = Enum.EasingStyle.Back, direction = Enum.EasingDirection.Out, scale = 1.4},
+					{duration = 0.2, style = Enum.EasingStyle.Elastic, direction = Enum.EasingDirection.Out, scale = 1},
+				})
+			end
+			
+			local lastRockSpawn = self._lastRockSpawnByAnimal[payload.animal] or 0
+			if (os.clock() - lastRockSpawn) >= 0.2 then
+				self._lastRockSpawnByAnimal[payload.animal] = os.clock()
+				self:_spawnFlyingRocks(worldPosition, payload.animal)
+			end
 		end
-		
-		self:_spawnFlyingRocks(worldPosition, payload.animal)
 	end
 
 	local animationController = self._runtime and self._runtime:GetController("PlayerAnimationController")
@@ -399,14 +498,49 @@ end
 function EffectsController:_handleAnimalSpawn(payload)
 	local animal = payload.animal
 	if animal == nil or animal.Parent == nil then return end
-	if animal:IsA("Model") and #animal:GetChildren() == 0 then task.wait(0.1) end
-	if animal:IsA("Model") then
-		local baseScale = animal:GetScale()
-		self._modelBaseScales[animal] = baseScale
-		self:_playModelScaleSequence(animal, {
-			{duration = 0.8, style = Enum.EasingStyle.Elastic, direction = Enum.EasingDirection.Out, scale = 1},
-		}, { restore = true, startScaleMultiplier = 0.01 })
-	end
+	
+	-- Robust wait for model to replicate its parts in high-ping scenarios
+	task.spawn(function()
+		local start = os.clock()
+		local lastExtentsSize = Vector3.zero
+		local stableCount = 0
+		
+		-- Wait until extents size is stable (no new parts arriving for a few checks)
+		-- or timeout after 3 seconds
+		while os.clock() - start < 3 do
+			if animal.Parent == nil then return end
+			local currentSize = animal:GetExtentsSize()
+			
+			if currentSize.Magnitude > 0 then
+				if (currentSize - lastExtentsSize).Magnitude < 0.1 then
+					stableCount += 1
+				else
+					stableCount = 0
+				end
+			end
+			
+			if stableCount >= 3 then break end
+			lastExtentsSize = currentSize
+			task.wait(0.15)
+		end
+		
+		if animal.Parent == nil then return end
+
+		if animal:IsA("Model") then
+			-- Prioritize the server-provided BaseScale attribute
+			local baseScale = animal:GetAttribute("BaseScale") or animal:GetScale()
+			
+			-- Sanity check: if scale is zero or extremely weird, default to 1
+			if baseScale <= 0 or baseScale > 10 then
+				baseScale = 1
+			end
+			
+			self._modelBaseScales[animal] = baseScale
+			self:_playModelScaleSequence(animal, {
+				{duration = 0.8, style = Enum.EasingStyle.Elastic, direction = Enum.EasingDirection.Out, scale = 1},
+			}, { restore = true, startScaleMultiplier = 0.01 })
+		end
+	end)
 end
 
 function EffectsController:_handleAnimalDespawn(payload)
@@ -418,10 +552,11 @@ function EffectsController:_handleAnimalDespawn(payload)
 end
 
 function EffectsController:_handleAnimalPickup(payload)
+	if typeof(payload) ~= "table" then return end
 	local target = payload.target
-	if not target or not target.Parent then return end
+	if typeof(target) ~= "Instance" then return end
+	if not target.Parent then return end
 	if self._dropAnimations[target] then
-		self._dropAnimations[target].IsPickedUp = true
 		self._dropAnimations[target] = nil
 	end
 	if target:IsA("Model") then
@@ -464,26 +599,33 @@ function EffectsController:_handleShrineHit(payload)
 end
 
 function EffectsController:_handlePlayerUpgrade()
-	local camera = Workspace.CurrentCamera
-	if not camera then return end
-	local oldFov = camera.FieldOfView
-	TweenService:Create(camera, TweenInfo.new(0.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {FieldOfView = oldFov + 15}):Play()
-	task.delay(0.1, function() TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {FieldOfView = oldFov}):Play() end)
-	self:_screenFlash(Color3.fromRGB(255, 220, 50), 0.6, 0.6)
+	ScreenEffects.RewardEffect(self._runtime.Player, {
+		CameraIntensity = 15,
+		Confetti = false
+	})
+	
+	local soundController = self._runtime:GetController("SoundController")
+	if soundController then
+		soundController:PlayLocal("Buy", { volume = 0.6 })
+	end
 end
 
 function EffectsController:_handleAnimalDelivered()
-	local camera = Workspace.CurrentCamera
-	if camera then
-		local oldFov = camera.FieldOfView
-		TweenService:Create(camera, TweenInfo.new(0.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {FieldOfView = oldFov + 12}):Play()
-		task.delay(0.1, function()
-			TweenService:Create(camera, TweenInfo.new(0.6, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {FieldOfView = oldFov}):Play()
-		end)
+	local now = os.clock()
+	if (now - self._lastDeliveredEffectAt) < 1 then
+		return
 	end
-	
-	ScreenEffects.VignettePulse(self._runtime.Player)
-	ScreenEffects.ConfettiBurst(self._runtime.Player, 80)
+	self._lastDeliveredEffectAt = now
+
+	ScreenEffects.RewardEffect(self._runtime.Player, {
+		CameraIntensity = 12,
+		Confetti = true,
+		ConfettiAmount = 30
+	})
+	local soundController = self._runtime:GetController("SoundController")
+	if soundController then
+		soundController:PlayLocal("AnimalDelivered")
+	end
 end
 
 function EffectsController:_handleEffect(effectName, payload)
@@ -497,12 +639,43 @@ function EffectsController:_handleEffect(effectName, payload)
 	elseif effectName == self._config.Effects.Names.AnimalDelivered then self:_handleAnimalDelivered()
 	elseif effectName == self._config.Effects.Names.AnimalDespawn then self:_handleAnimalDespawn(payload)
 	elseif effectName == self._config.Effects.Names.PlayerUpgrade then self:_handlePlayerUpgrade()
-	elseif effectName == "ConfettiBurst" then ScreenEffects.ConfettiBurst(self._runtime.Player, payload.amount) end
+	elseif effectName == "ConfettiBurst" then ScreenEffects.RewardEffect(self._runtime.Player, { Confetti = true, ConfettiAmount = payload.amount }) end
 end
 
 function EffectsController:Start()
-	self._dropsFolder.ChildAdded:Connect(function(drop) -- Placeholder for drop tracking if needed
+	self._dropsFolder.ChildAdded:Connect(function(drop)
+		if not drop:IsA("Model") then return end
+		
+		-- 1. POP ANIMATION
+		-- Wait a tiny bit for the model to be fully ready/cloned
+		task.defer(function()
+			if not drop.Parent then return end
+			
+			local originalScale = drop:GetScale()
+			drop:ScaleTo(0.01)
+			
+			local scaleVal = Instance.new("NumberValue")
+			scaleVal.Value = 0.01
+			scaleVal.Name = "DropScale"
+			scaleVal.Parent = drop
+			
+			scaleVal.Changed:Connect(function(val)
+				if drop.Parent then
+					drop:ScaleTo(val)
+				end
+			end)
+			
+			TweenService:Create(scaleVal, TweenInfo.new(0.6, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {Value = originalScale}):Play()
+			
+			-- 2. SLOW SPINNING (single shared heartbeat loop)
+			self._dropAnimations[drop] = 60
+			drop.Destroying:Connect(function()
+				self._dropAnimations[drop] = nil
+			end)
+			self:_ensureDropSpinLoop()
+		end)
 	end)
+
 	self._remote.OnClientEvent:Connect(function(effectName, payload)
 		self:_handleEffect(effectName, payload or {})
 	end)

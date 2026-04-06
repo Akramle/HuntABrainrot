@@ -13,7 +13,7 @@ local function getBaseFromDescendant(descendant, bases)
 		current = current.Parent
 	end
 
-	if current and current:IsA("Folder") then
+	if current and (current:IsA("Folder") or current:IsA("Model")) then
 		return current
 	end
 
@@ -26,31 +26,79 @@ function PromptController:Init(runtime)
 	self._stealPromptRemote = runtime.Remotes:GetStealPromptRemote()
 	self._pendingProducts = {}
 	self._movementLock = nil
+	self._trackedPrompts = {}
+	self._promptConnections = {}
+end
+
+function PromptController:_refreshPrompt(prompt: ProximityPrompt)
+	local role = prompt:GetAttribute("VisibilityRole")
+	if role ~= "OwnerOnly" and role ~= "VisitorOnly" then
+		return
+	end
+
+	local base = getBaseFromDescendant(prompt, self._bases)
+	if base == nil then
+		return
+	end
+
+	local promptActive = prompt:GetAttribute("PromptActive") ~= false
+	local isOwner = base.Name == self._player.Name
+	local shouldEnable = promptActive
+		and ((role == "OwnerOnly" and isOwner) or (role == "VisitorOnly" and not isOwner))
+
+	if prompt.Enabled ~= shouldEnable then
+		prompt.Enabled = shouldEnable
+	end
+end
+
+function PromptController:_untrackPrompt(prompt: ProximityPrompt)
+	self._trackedPrompts[prompt] = nil
+	local connectionBag = self._promptConnections[prompt]
+	if connectionBag then
+		for _, conn in ipairs(connectionBag) do
+			conn:Disconnect()
+		end
+		self._promptConnections[prompt] = nil
+	end
+end
+
+function PromptController:_trackPrompt(prompt: ProximityPrompt)
+	if self._trackedPrompts[prompt] then
+		return
+	end
+
+	local role = prompt:GetAttribute("VisibilityRole")
+	if role ~= "OwnerOnly" and role ~= "VisitorOnly" then
+		return
+	end
+
+	self._trackedPrompts[prompt] = true
+	local connections = {}
+	self._promptConnections[prompt] = connections
+
+	table.insert(connections, prompt:GetAttributeChangedSignal("VisibilityRole"):Connect(function()
+		self:_refreshPrompt(prompt)
+	end))
+	table.insert(connections, prompt:GetAttributeChangedSignal("PromptActive"):Connect(function()
+		self:_refreshPrompt(prompt)
+	end))
+	table.insert(connections, prompt.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			self:_untrackPrompt(prompt)
+		else
+			self:_refreshPrompt(prompt)
+		end
+	end))
+
+	self:_refreshPrompt(prompt)
 end
 
 function PromptController:_refreshPrompts()
-	for _, descendant in ipairs(self._bases:GetDescendants()) do
-		if not descendant:IsA("ProximityPrompt") then
-			continue
-		end
-
-		local role = descendant:GetAttribute("VisibilityRole")
-		if role ~= "OwnerOnly" and role ~= "VisitorOnly" then
-			continue
-		end
-
-		local base = getBaseFromDescendant(descendant, self._bases)
-		if base == nil then
-			continue
-		end
-
-		local promptActive = descendant:GetAttribute("PromptActive") ~= false
-		local isOwner = base.Name == self._player.Name
-		local shouldEnable = promptActive
-			and ((role == "OwnerOnly" and isOwner) or (role == "VisitorOnly" and not isOwner))
-
-		if descendant.Enabled ~= shouldEnable then
-			descendant.Enabled = shouldEnable
+	for prompt in pairs(self._trackedPrompts) do
+		if prompt.Parent then
+			self:_refreshPrompt(prompt)
+		else
+			self:_untrackPrompt(prompt)
 		end
 	end
 end
@@ -148,12 +196,29 @@ function PromptController:Start()
 		self._movementLock = nil
 	end)
 
-	task.spawn(function()
-		while true do
-			self:_refreshPrompts()
-			task.wait(0.15)
+	for _, descendant in ipairs(self._bases:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			self:_trackPrompt(descendant)
+		end
+	end
+
+	self._bases.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("ProximityPrompt") then
+			self:_trackPrompt(descendant)
 		end
 	end)
+
+	self._bases.DescendantRemoving:Connect(function(descendant)
+		if descendant:IsA("ProximityPrompt") then
+			self:_untrackPrompt(descendant)
+		end
+	end)
+
+	self._player.CharacterAdded:Connect(function()
+		self:_refreshPrompts()
+	end)
+
+	self:_refreshPrompts()
 end
 
 return PromptController

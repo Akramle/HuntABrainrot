@@ -6,6 +6,7 @@ local ScreenEffects = {}
 
 local activeParticles = {}
 local updateConnection = nil
+local MAX_ACTIVE_PARTICLES = 220
 
 local COLORS = {
   Confetti = {
@@ -89,6 +90,10 @@ local function startUpdateLoop()
   end)
 end
 
+local function canSpawnParticle()
+	return #activeParticles < MAX_ACTIVE_PARTICLES
+end
+
 local function getScreenGui(player)
   local playerGui = player:WaitForChild("PlayerGui")
   local gui = playerGui:FindFirstChild("ScreenEffectsGui")
@@ -106,8 +111,15 @@ function ScreenEffects.ConfettiBurst(player, amount)
   local gui = getScreenGui(player)
   local screenWidth = gui.AbsoluteSize.X
   amount = amount or 100
+  if #activeParticles >= MAX_ACTIVE_PARTICLES then
+    return
+  end
+  amount = math.min(amount, MAX_ACTIVE_PARTICLES - #activeParticles)
   
   for i = 1, amount do
+    if not canSpawnParticle() then
+      break
+    end
     local isLeft = i <= (amount / 2)
     local originX = isLeft and 0 or screenWidth
     local originY = 0
@@ -120,7 +132,7 @@ function ScreenEffects.ConfettiBurst(player, amount)
     
     local angle = math.rad(isLeft and math.random(-80, -10) or math.random(-170, -100))
     local force = math.random(600, 1800)
-    local life = math.random(25, 45) / 10
+    local life = math.random(12, 24) / 10
 
     table.insert(activeParticles, {
       Type = "Confetti",
@@ -187,6 +199,9 @@ function ScreenEffects.DivineFlash(player)
   -- 3. Divine Rays
   local numRays = math.random(14, 18)
   for i = 1, numRays do
+    if not canSpawnParticle() then
+      break
+    end
     local ray = Instance.new("Frame")
     ray.AnchorPoint = Vector2.new(0.5, 0.5)
     ray.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -228,68 +243,71 @@ function ScreenEffects.DivineFlash(player)
   startUpdateLoop()
 end
 
+function ScreenEffects.CameraPop(player, intensity)
+  intensity = intensity or 12
+  local camera = Workspace.CurrentCamera
+  if not camera then return end
+
+  local oldFov = camera.FieldOfView
+  TweenService:Create(camera, TweenInfo.new(0.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {FieldOfView = oldFov + intensity}):Play()
+  task.delay(0.1, function()
+    TweenService:Create(camera, TweenInfo.new(0.6, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {FieldOfView = oldFov}):Play()
+  end)
+end
+
 function ScreenEffects.VignettePulse(player)
   local gui = getScreenGui(player)
+  gui.DisplayOrder = 1000 -- Ensure it's on top of everything
+  
   local color = randomVignetteColor()
-  local targetTransparency = 0.45
-  local thickness = 0.3
+  local targetTransparency = 0 -- Fully visible
 
-  local container = Instance.new("Frame")
-  container.Name = "VignettePulse"
-  container.BackgroundTransparency = 1
-  container.Size = UDim2.fromScale(1, 1)
-  container.ZIndex = 30
-  container.Parent = gui
+  local vignette = Instance.new("ImageLabel")
+  vignette.Name = "VignettePulse"
+  vignette.BackgroundTransparency = 1
+  -- Updated asset ID
+  vignette.Image = "rbxassetid://18720640102"
+  vignette.ImageColor3 = color
+  vignette.ImageTransparency = 1
+  vignette.Size = UDim2.fromScale(1, 1)
+  vignette.Position = UDim2.fromScale(0.5, 0.5)
+  vignette.AnchorPoint = Vector2.new(0.5, 0.5)
+  vignette.ScaleType = Enum.ScaleType.Stretch
+  vignette.ZIndex = 100
+  vignette.Visible = true
+  vignette.Parent = gui
 
-  local function makeEdge(name, size, position, gradientRotation)
-    local edge = Instance.new("Frame")
-    edge.Name = name
-    edge.Size = size
-    edge.Position = position
-    edge.BorderSizePixel = 0
-    edge.BackgroundColor3 = color
-    edge.BackgroundTransparency = 1
-    edge.ZIndex = 30
-    edge.Parent = container
+  -- Animate in
+  TweenService:Create(vignette, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+    ImageTransparency = targetTransparency,
+  }):Play()
 
-    local gradient = Instance.new("UIGradient")
-    gradient.Rotation = gradientRotation
-    gradient.Transparency = NumberSequence.new({
-      NumberSequenceKeypoint.new(0, 0),
-      NumberSequenceKeypoint.new(0.75, 0.8),
-      NumberSequenceKeypoint.new(1, 1),
-    })
-    gradient.Parent = edge
-
-    return edge
-  end
-
-  local edges = {
-    makeEdge("Top", UDim2.fromScale(1, thickness), UDim2.fromScale(0, 0), 90),
-    makeEdge("Bottom", UDim2.fromScale(1, thickness), UDim2.fromScale(0, 1 - thickness), 270),
-    makeEdge("Left", UDim2.fromScale(thickness, 1), UDim2.fromScale(0, 0), 0),
-    makeEdge("Right", UDim2.fromScale(thickness, 1), UDim2.fromScale(1 - thickness, 0), 180),
-  }
-
-  for _, edge in ipairs(edges) do
-    TweenService:Create(edge, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-      BackgroundTransparency = targetTransparency,
+  -- Fade out
+  task.delay(0.2, function()
+    TweenService:Create(vignette, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+      ImageTransparency = 1,
     }):Play()
+  end)
+
+  -- Cleanup
+  task.delay(1.1, function()
+    if vignette.Parent then
+      vignette:Destroy()
+    end
+  end)
+end
+
+function ScreenEffects.RewardEffect(player, config)
+  config = config or {}
+  if config.CameraPop ~= false then
+    ScreenEffects.CameraPop(player, config.CameraIntensity)
   end
-
-  task.delay(0.12, function()
-    for _, edge in ipairs(edges) do
-      TweenService:Create(edge, TweenInfo.new(0.65, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
-        BackgroundTransparency = 1,
-      }):Play()
-    end
-  end)
-
-  task.delay(0.85, function()
-    if container.Parent then
-      container:Destroy()
-    end
-  end)
+  if config.Vignette ~= false then
+    ScreenEffects.VignettePulse(player)
+  end
+  if config.Confetti then
+    ScreenEffects.ConfettiBurst(player, config.ConfettiAmount or 80)
+  end
 end
 
 return ScreenEffects

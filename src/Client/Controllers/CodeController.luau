@@ -59,121 +59,19 @@ function CodeController:_setGroupTransparency(obj: GuiObject, transparency: numb
 	end
 end
 
-function CodeController:_setEffectsActive(active: boolean)
-	local targetBlur = active and BLUR_SIZE or 0
-	if active then
-		if not self._blur then
-			self._blur = Instance.new("BlurEffect")
-			self._blur.Size = 0
-			self._blur.Parent = Lighting
-		end
-	end
-
-	if self._blur then
-		local blurTween = TweenService:Create(self._blur, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = targetBlur})
-		if not active then
-			blurTween.Completed:Connect(function()
-				if not active and self._blur then
-					self._blur:Destroy()
-					self._blur = nil
-				end
-			end)
-		end
-		blurTween:Play()
-	end
-
-	local main = self._pGui:FindFirstChild("Main")
-	if main then
-		-- Handle all top-level elements in Main
-		for _, child in ipairs(main:GetChildren()) do
-			if child:IsA("GuiObject") then
-				if child.Name == "Buttons" then
-					-- Handle individual buttons/wrappers inside
-					for _, btnNode in ipairs(child:GetChildren()) do
-						if btnNode:IsA("GuiObject") then
-							local isCodesBtn = (btnNode.Name == "CodesBtn") or btnNode:FindFirstChild("CodesBtn", true) ~= nil
-							if not isCodesBtn then
-								self:_setGroupTransparency(btnNode, active and 1 or 0)
-							end
-						end
-					end
-				elseif child.Name ~= "Tabs" and child.Name ~= "CoinsFrame" then
-					-- Hide other sidebar/HUD elements
-					child.Visible = not active
-				end
-			end
-		end
-	end
-end
-
 function CodeController:BindUI()
-	print("[CodeController] Binding UI...")
+	print("[CodeController] Binding Code logic...")
 	
 	local main = self._pGui:WaitForChild("Main", 20)
-	local buttons = main and main:WaitForChild("Buttons", 10)
 	local tabs = main and main:WaitForChild("Tabs", 10)
+	local codesTab = tabs and tabs:FindFirstChild("Codes")
 	
-	if not buttons or not tabs then return end
-	
-	local codesBtn = buttons:FindFirstChild("CodesBtn", true)
-	local codesTab = tabs:WaitForChild("Codes", 10)
-	
-	if not codesBtn or not codesTab then return end
+	if not codesTab then return end
 
-	-- Initial Setup
-	local scale = codesTab:FindFirstChildOfClass("UIScale") or Instance.new("UIScale", codesTab)
-	scale.Scale = 0
-	codesTab.Visible = false
-	
-	if codesTab:IsA("CanvasGroup") then
-		codesTab.GroupTransparency = 1
-	end
-	
-	local backBtn = codesTab:FindFirstChild("btn", true)
 	local redeemFrame = codesTab:FindFirstChild("RedeemFrame")
 	local redeemBtn = redeemFrame and redeemFrame:FindFirstChild("btn")
 	local inputFrame = codesTab:FindFirstChild("InputFrame")
 	local inputField = inputFrame and inputFrame:FindFirstChild("input")
-
-	local isAnimating = false
-	local function setTabVisible(visible: boolean)
-		if isAnimating then return end
-		if visible == codesTab.Visible then return end
-		
-		isAnimating = true
-		
-		if visible then
-			codesTab.Visible = true
-			self:_setEffectsActive(true)
-			if codesTab:IsA("CanvasGroup") then
-				TweenService:Create(codesTab, TweenInfo.new(0.3), {GroupTransparency = 0}):Play()
-			end
-			local t = TweenService:Create(scale, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1})
-			t.Completed:Connect(function() isAnimating = false end)
-			t:Play()
-		else
-			self:_setEffectsActive(false)
-			if codesTab:IsA("CanvasGroup") then
-				TweenService:Create(codesTab, TweenInfo.new(0.3), {GroupTransparency = 1}):Play()
-			end
-			local tween = TweenService:Create(scale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Scale = 0})
-			tween.Completed:Connect(function()
-				codesTab.Visible = false
-				isAnimating = false
-			end)
-			tween:Play()
-		end
-	end
-
-	codesBtn.MouseButton1Click:Connect(function()
-		setTabVisible(not codesTab.Visible)
-	end)
-
-	if backBtn and backBtn:IsA("GuiButton") then
-		backBtn.MouseButton1Click:Connect(function()
-			setTabVisible(false)
-		end)
-	end
 
 	if redeemBtn and redeemBtn:IsA("GuiButton") and inputField and inputField:IsA("TextBox") then
 		redeemBtn.MouseButton1Click:Connect(function()
@@ -188,11 +86,6 @@ function CodeController:BindUI()
 					notif:ShowNotification(tostring(message or "Code Redeemed!"), "Announcement") 
 				end
 				
-				-- Trigger existing confetti handler
-				if ScreenEffects and ScreenEffects.ConfettiBurst then
-					ScreenEffects.ConfettiBurst(self._player)
-				end
-				
 				inputField.Text = ""
 			else
 				if notif then 
@@ -205,20 +98,7 @@ function CodeController:BindUI()
 end
 
 function CodeController:Start()
-	task.spawn(function()
-		while true do
-			local main = self._pGui:FindFirstChild("Main")
-			if main then
-				local buttons = main:FindFirstChild("Buttons", true)
-				local btn = buttons and buttons:FindFirstChild("CodesBtn", true)
-				if btn and not btn:GetAttribute("CodeControllerBound") then
-					btn:SetAttribute("CodeControllerBound", true)
-					self:BindUI()
-				end
-			end
-			task.wait(2)
-		end
-	end)
+	self:BindUI()
 end
 
 return CodeController

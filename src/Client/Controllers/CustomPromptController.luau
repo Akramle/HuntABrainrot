@@ -10,7 +10,7 @@ local CustomPromptController = {
 }
 
 local COIN_IMAGE = "rbxassetid://110831422321689"
-local MOBILE_TAP_IMAGE = "rbxassetid://9071533710"
+local MOBILE_TAP_IMAGE = "rbxassetid://9071533698"
 
 function CustomPromptController:Init(runtime)
 	self._prompts = {}

@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 
 local AnnouncementController = {
 	Name = "AnnouncementController",
@@ -108,7 +107,7 @@ function AnnouncementController:_applyPovEffect()
 				math.random(-100, 100) / 100 * currentIntensity
 			)
 			self._camera.CFrame = self._camera.CFrame * CFrame.new(offset)
-			RunService.RenderStepped:Wait()
+			task.wait(0.033)
 		end
 	end)
 end
@@ -198,7 +197,7 @@ function AnnouncementController:ShowDivineAnnouncement()
 			local pulse = 1 + math.sin(elapsed * 12) * 0.04
 			uiScale.Scale = pulse
 			
-			RunService.RenderStepped:Wait()
+			task.wait(0.033)
 		end
 	end)
 	

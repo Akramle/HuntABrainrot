@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ViewportHelper = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ViewportHelper"))
 
 local AdminController = {
 	Name = "AdminController",
@@ -30,30 +31,7 @@ local function applyStyling(instance, bgColor)
 end
 
 local function buildViewport(model, parentFrame)
-	local viewport = Instance.new("ViewportFrame")
-	viewport.Size = UDim2.fromScale(1, 1)
-	viewport.BackgroundTransparency = 1
-	viewport.Parent = parentFrame
-
-	local worldModel = Instance.new("WorldModel")
-	worldModel.Parent = viewport
-
-	local displayClone = model:Clone()
-	displayClone.Parent = worldModel
-	
-	local cf, size = displayClone:GetBoundingBox()
-	local maxDim = math.max(size.X, size.Y, size.Z)
-	if maxDim < 0.5 then maxDim = 1 end
-	
-	local camera = Instance.new("Camera")
-	viewport.CurrentCamera = camera
-	camera.Parent = viewport
-	
-	local fov = math.rad(camera.FieldOfView)
-	local distance = (maxDim / 2) / math.tan(fov / 2) * 1.3
-	
-	camera.CFrame = CFrame.lookAt(cf.Position + Vector3.new(-distance*0.4, distance * 0.4, distance), cf.Position)
-	return viewport
+	return ViewportHelper.BuildViewport(model, parentFrame)
 end
 
 function AdminController:_createPickerGui(data)

@@ -65,6 +65,11 @@ function RemoteRegistry:GetStealPromptRemote()
 	return ensureRemoteEvent(folder, "StealAnimalPrompt")
 end
 
+function RemoteRegistry:GetCarryAnimalRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "CarryAnimalAction")
+end
+
 function RemoteRegistry:GetSoundRemote()
 	local folder = ensureFolder()
 	return ensureRemoteEvent(folder, "SoundAction")
@@ -78,11 +83,6 @@ end
 function RemoteRegistry:GetHidingRemote()
 	local folder = ensureFolder()
 	return ensureRemoteEvent(folder, "HidingAction")
-end
-
-function RemoteRegistry:GetCarryAnimalRemote()
-	local folder = ensureFolder()
-	return ensureRemoteEvent(folder, "CarryAnimalAction")
 end
 
 function RemoteRegistry:GetUpgradeRemote()
@@ -123,6 +123,46 @@ end
 function RemoteRegistry:GetGearRemote()
 	local folder = ensureFolder()
 	return ensureRemoteEvent(folder, "GearAction")
+end
+
+function RemoteRegistry:GetMerchantRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "MerchantAction")
+end
+
+function RemoteRegistry:GetSwordsGuiRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "SwordsGuiAction")
+end
+
+function RemoteRegistry:GetPurchaseSwordRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "PurchaseSwordAction")
+end
+
+function RemoteRegistry:GetEquipSwordRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "EquipSwordAction")
+end
+
+function RemoteRegistry:GetLuckyBlockRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "LuckyBlockAction")
+end
+
+function RemoteRegistry:GetRebirthRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "RebirthAction")
+end
+
+function RemoteRegistry:GetBaseUpgradeRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "BaseUpgradeAction")
+end
+
+function RemoteRegistry:GetGiftRemote()
+	local folder = ensureFolder()
+	return ensureRemoteEvent(folder, "GiftAction")
 end
 
 return RemoteRegistry

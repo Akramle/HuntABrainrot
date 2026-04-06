@@ -49,6 +49,11 @@ local function fadeGui(guiObj, fadeIn, duration)
 end
 
 function EventController:StartEvent(eventName: string, duration: number)
+	local musicController = self._runtime:GetController("MusicController")
+	if musicController then
+		musicController:SetEventActive(true)
+	end
+
 	local rsEvents = ReplicatedStorage:WaitForChild("ActiveEvents", 5)
 	local eventData = rsEvents and rsEvents:WaitForChild(eventName, 5)
 	if not eventData then return end
@@ -180,6 +185,11 @@ function EventController:StartEvent(eventName: string, duration: number)
 end
 
 function EventController:EndEvent(eventName: string)
+	local musicController = self._runtime:GetController("MusicController")
+	if musicController then
+		musicController:SetEventActive(false)
+	end
+
 	if self._activeMusic then
 		local tween = TweenService:Create(self._activeMusic, TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Volume = 0})
 		tween:Play()

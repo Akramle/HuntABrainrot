@@ -63,7 +63,7 @@ function CarryAnimalController:Start()
 	-- Initial hide
 	dropBtnFrame.Visible = false
 	if uiScale then
-		uiScale.Scale = 0.7
+		uiScale.Scale = 1
 	end
 
 	self._playerGui = playerGui
@@ -94,7 +94,7 @@ function CarryAnimalController:Start()
 
 		-- Hide all other ScreenGuis (inventory, notifications, menus, etc).
 		for _, child in ipairs(playerGui:GetChildren()) do
-			if child:IsA("ScreenGui") and child ~= mainHud then
+			if child:IsA("ScreenGui") and child ~= mainHud and child.Name ~= "TouchGui" then
 				self._guiSnapshot.screenGuiEnabled[child] = child.Enabled
 				child.Enabled = false
 			end
@@ -114,12 +114,7 @@ function CarryAnimalController:Start()
 		tweenGroupTransparency(dropBtnFrame, 0, 0.15)
 
 		if uiScale then
-			uiScale.Scale = 0.7
-			TweenService:Create(
-				uiScale,
-				TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-				{ Scale = 1 }
-			):Play()
+			uiScale.Scale = 1
 		end
 	end
 
@@ -149,11 +144,7 @@ function CarryAnimalController:Start()
 
 		-- Hide drop frame
 		if uiScale then
-			TweenService:Create(
-				uiScale,
-				TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{ Scale = 0.7 }
-			):Play()
+			uiScale.Scale = 1
 		end
 		task.delay(0.18, function()
 			if dropBtnFrame then

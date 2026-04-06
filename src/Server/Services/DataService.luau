@@ -229,8 +229,8 @@ local function syncTreeNode(instance: Instance, node)
 	end
 
 	for _, child in ipairs(instance:GetChildren()) do
-		if child.Name == "UnlockedAreas" then continue end
-		
+		if child.Name == "UnlockedAreas" or child.Name == "Merchant" or child.Name == "Rebirths" or child.Name == "Diamonds" or child.Name == "Bucks" or child.Name == "BaseUpgrade" then continue end
+
 		if (TREE_CONTAINER_CLASSES[child.ClassName] or VALUE_CLASS_NAMES[child.ClassName]) and not expectedChildren[child] then
 			child:Destroy()
 		end

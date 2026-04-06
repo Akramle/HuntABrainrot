@@ -36,38 +36,42 @@ function NotificationController:_createNotifUI(message: string, nType: string)
 	main.Name = "Notif"
 	main.Size = UDim2.fromScale(NOTIF_WIDTH, NOTIF_HEIGHT)
 	main.Position = UDim2.fromScale(NOTIF_START_X, NOTIF_START_Y)
-	main.BackgroundColor3 = nType == "Warning" and Color3.fromRGB(60, 20, 20) or Color3.fromRGB(20, 20, 30)
-	main.BackgroundTransparency = 0.2
+	-- Cartoony Light Theme: White background for info, Light Red for warning
+	main.BackgroundColor3 = nType == "Warning" and Color3.fromRGB(255, 210, 210) or Color3.fromRGB(255, 255, 255)
+	main.BackgroundTransparency = 0 -- Solid background for cartoony look
 	main.GroupTransparency = 1
 	main.Parent = screenGui
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
+	corner.CornerRadius = UDim.new(0, 16) -- Rounder cartoony corners
 	corner.Parent = main
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = nType == "Warning" and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(80, 80, 255)
-	stroke.Thickness = 2
-	stroke.Transparency = 0.5
+	-- Thicker, solid stroke
+	stroke.Color = nType == "Warning" and Color3.fromRGB(200, 40, 40) or Color3.fromRGB(30, 30, 40)
+	stroke.Thickness = 4
+	stroke.Transparency = 0
 	stroke.Parent = main
 
 	local icon = Instance.new("TextLabel")
 	icon.Name = "Icon"
 	icon.Size = UDim2.fromScale(0.2, 1)
+	icon.Position = UDim2.fromScale(0.02, 0)
 	icon.BackgroundTransparency = 1
 	icon.Font = Enum.Font.FredokaOne
-	icon.Text = nType == "Warning" and "⚠️" or "🔔"
-	icon.TextSize = 24
+	icon.Text = nType == "Warning" and "⚠️" or "📢"
+	icon.TextSize = 32 -- Larger cartoony icon
 	icon.Parent = main
 
 	local textLabel = Instance.new("TextLabel")
 	textLabel.Name = "Message"
 	textLabel.Size = UDim2.new(0.75, 0, 1, 0)
-	textLabel.Position = UDim2.fromScale(0.2, 0)
+	textLabel.Position = UDim2.fromScale(0.22, 0)
 	textLabel.BackgroundTransparency = 1
 	textLabel.Font = Enum.Font.FredokaOne
 	textLabel.Text = message
-	textLabel.TextColor3 = Color3.new(1, 1, 1)
+	-- Darker text to contrast with light background
+	textLabel.TextColor3 = nType == "Warning" and Color3.fromRGB(150, 20, 20) or Color3.fromRGB(40, 40, 40)
 	textLabel.TextScaled = true
 	textLabel.TextXAlignment = Enum.TextXAlignment.Left
 	textLabel.RichText = true
@@ -76,7 +80,7 @@ function NotificationController:_createNotifUI(message: string, nType: string)
 	local padding = Instance.new("UIPadding")
 	padding.PaddingTop = UDim.new(0.2, 0)
 	padding.PaddingBottom = UDim.new(0.2, 0)
-	padding.PaddingLeft = UDim.new(0.05, 0)
+	padding.PaddingLeft = UDim.new(0.02, 0)
 	padding.PaddingRight = UDim.new(0.05, 0)
 	padding.Parent = textLabel
 

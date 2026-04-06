@@ -25,9 +25,11 @@ function ConfigService:Start()
 			Combat = self._config.Combat,
 			Inventory = self._config.Inventory,
 			Gear = self._config.Gear,
+			Rebirth = self._config.Rebirth,
+			BaseUpgrades = self._config.BaseUpgrades,
 			Animals = {
 				RarityOrder = self._config.Animals.RarityOrder,
-				-- We don't send stats or spawn pools to client
+				Leveling = self._config.Animals.Leveling,
 			}
 		}
 	end

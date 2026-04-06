@@ -24,18 +24,76 @@ local ServerConfig = {
 	Upgrades = {
 		Swords = {
 			["Wooden Sword"] = {
+				BaseDamage = 25,
+				Cost = 0,
 				MaxLevel = 10,
 				BaseCost = 50,
 				CostMultiplier = 1.5,
 				DamageBonusPerLevel = 0.85, 
-				AllowedRarities = {"Common", "Uncommon", "Rare", "Legendary", "Mythical", "Devine"}
+				AllowedRarities = {"Common", "LuckyBlocks"}
 			},
 			["Stone Sword"] = {
+				BaseDamage = 250,
+				Cost = 250,
 				MaxLevel = 10,
 				BaseCost = 150,
 				CostMultiplier = 1.6,
 				DamageBonusPerLevel = 1.8,
-				AllowedRarities = {"Common", "Uncommon", "Rare"}
+				AllowedRarities = {"Common", "Uncommon", "LuckyBlocks"}
+			},
+			["Diamond Sword"] = {
+				BaseDamage = 1500,
+				Cost = 12000,
+				MaxLevel = 10,
+				BaseCost = 2500,
+				CostMultiplier = 2.5,
+				DamageBonusPerLevel = 0.85,
+				AllowedRarities = {"Common", "Uncommon", "Rare", "LuckyBlocks"}
+			},
+			["Obsidian Sword"] = {
+				BaseDamage = 8900,
+				Cost = 354700,
+				MaxLevel = 10,
+				BaseCost = 10000,
+				CostMultiplier = 3.5,
+				DamageBonusPerLevel = 0.85, 
+				AllowedRarities = {"Common", "Uncommon", "Rare", "Legendary", "LuckyBlocks"}
+			},
+			["Magma Sword"] = {
+				BaseDamage = 12500,
+				Cost = 7524100,
+				MaxLevel = 10,
+				BaseCost = 75000,
+				CostMultiplier = 5.2,
+				DamageBonusPerLevel = 0.85, 
+				AllowedRarities = {"Common", "Uncommon", "Rare", "Legendary", "Mythical", "LuckyBlocks"}
+			},
+			["Icebound Sword"] = {
+				BaseDamage = 35250,
+				Cost = 35785200,
+				MaxLevel = 10,
+				BaseCost = 257000,
+				CostMultiplier = 5.2,
+				DamageBonusPerLevel = 0.85, 
+				AllowedRarities = {"Common", "Uncommon", "Rare", "Legendary", "Mythical", "LuckyBlocks"}
+			},
+			["Star Eater"] = {
+				BaseDamage = 250000,
+				Cost = 5321250000,
+				MaxLevel = 10,
+				BaseCost = 1200000,
+				CostMultiplier = 7.7,
+				DamageBonusPerLevel = 0.85, 
+				AllowedRarities = {"Common", "Uncommon", "Rare", "Legendary", "Mythical", "Devine", "LuckyBlocks"}
+			},
+			["Godly Sword"] = {
+				BaseDamage = 785000,
+				Cost = 9254100000,
+				MaxLevel = 10,
+				BaseCost = 2350000,
+				CostMultiplier = 25.2,
+				DamageBonusPerLevel = 0.85, 
+				AllowedRarities = {"Common", "Uncommon", "Rare", "Legendary", "Mythical", "Devine", "LuckyBlocks"}
 			},
 			["Default"] = {
 				MaxLevel = 10,
@@ -64,7 +122,14 @@ local ServerConfig = {
 		AnimalStolen = "139965549997439",
 		AnimalUpgrade = "76531688808018",
 		CashCollected = "135428907715078",
-		DivineSpawn = "138332700851497"
+		DivineSpawn = "138332700851497",
+		Sell = "130452529897520",
+		Buy = "139075138086569",
+		Hide = "123769166924129",
+		AnimalDelivered = "109081723292068",
+		EnemyHit = "140249174178994",
+		UIHover = "140494750798924",
+		UIClick = "140014208317483"
 	},
 	Effects = {
 		NearbyRadius = 120,
@@ -94,7 +159,7 @@ local ServerConfig = {
 		HotbarSlots = 6
 	},
 	Data = {
-		StoreName = "CaptureBrainRots_PlayerData_v1.4.3",
+		StoreName = "CaptureBrainRots_PlayerData_v1.4.8",
 		AutoSaveInterval = 120
 	},
 	Events = {
@@ -107,7 +172,7 @@ local ServerConfig = {
 		},
 		
 		Shrine = {
-			Chance = 0.005, -- 15% chance per interval
+			Chance = 0.00001,
 			DurationRange = {50, 90},
 			MutationChancePerSecond = 0.1, -- 40% chance per second
 			ShrineDamageRange = {5, 15}, -- Damage to wild animals
@@ -123,7 +188,7 @@ local ServerConfig = {
 		},
 
 		Abduction = {
-			Chance = 0.04, -- 4% chance
+			Chance = 0.00001,
 			DurationRange = {80, 120},
 			UFOsPerArea = {1, 3},
 			MutationChance = 0.7,
@@ -139,16 +204,39 @@ local ServerConfig = {
 		},
 	},
 	Spawning = {
-		MaxAnimalsPerArea = 30,
+		MaxAnimalsPerArea = 40,
 		InitialSpawnCount = 10,
 		SpawnTimeMin = 5,
-		SpawnTimeMax = 15,
+		SpawnTimeMax = 8,
 		ClearanceBuffer = 4,
-		WildDespawnTimeMin = 30,
+		WildDespawnTimeMin = 50,
 		WildDespawnTimeMax = 120
 	},
 	Animals = {
+		LuckyBlocks = {
+			["Random Lucky Block"] = {
+				WaitTime = 30, -- 15 mins
+				RollRarities = {"Common", "Uncommon", "Rare"},
+				SpawnChance = 4
+			},
+			["Devine Lucky Block"] = {
+				WaitTime = 5 * 3600, -- 5 hours
+				RollRarities = {"Devine"},
+				SpawnChance = 0.1
+			},
+			["Mythic Lucky Block"] = {
+				WaitTime = 2 * 3600, -- 2 hours
+				RollRarities = {"Mythical"},
+				SpawnChance = 0.4
+			},
+			["Brainrot God Lucky Block"] = {
+				WaitTime = 4 * 3600, -- 4 hours
+				RollRarities = {"Legendary", "Mythical", "Devine"},
+				SpawnChance = 0.2
+			}
+		},
 		RarityOrder = {
+			"LuckyBlocks",
 			"Common",
 			"Uncommon",
 			"Rare",
@@ -166,6 +254,11 @@ local ServerConfig = {
 			Gold = 0.05 -- 1%
 		},
 		Stats = {
+			LuckyBlocks = {
+				Health = {150, 450},
+				Cost = {0, 0},
+				Revenue = {0, 0}
+			},
 			Common = {
 				Health = {10, 80},
 				Cost = {20, 120},
@@ -283,11 +376,61 @@ local ServerConfig = {
 		},
 		["Speed Coil"] = {
 			Price = 8700,
-			SpeedBoost = 25,
+			SpeedBoost = 70,
 		},
 		["Gravity Coil"] = {
 			Price = 15200,
-			GravityMultiplier = 0.81,
+			GravityMultiplier = 0.95,
+		},
+		["Flying Carpet"] = {
+			Price = 750000
+		}
+	},
+
+	Rebirth = {
+		MultiplierIncrease = 0.2,
+		Requirements = {
+			{
+				RebirthCount = 0,
+				Bucks = 1000000,
+				Diamonds = 0,
+				Animals = {"Tung Tung Tung Sahur", "Penguino Cocosino"} -- Example requirement
+			},
+			{
+				RebirthCount = 1,
+				Bucks = 2500000,
+				Diamonds = 0,
+				Animals = {"Fluriflura", "Frigo Camelo"}
+			},
+			{
+				RebirthCount = 1,
+				Bucks = 15000000,
+				Diamonds = 0,
+				Animals = {"Gattito Tacoto"}
+			}
+		}
+	},
+
+	BaseUpgrades = {
+		["2"] = {
+			Level = 2,
+			Price = 5000000,
+			Rebirths = 1
+		},
+		["3"] = {
+			Level = 3,
+			Price = 30000000,
+			Rebirths = 2
+		},
+		["4"] = {
+			Level = 4,
+			Price = 120000000,
+			Rebirths = 5
+		},
+		["5"] = {
+			Level = 5,
+			Price = 1000000000,
+			Rebirths = 6
 		}
 	}
 };

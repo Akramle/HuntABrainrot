@@ -75,9 +75,24 @@ function UpgradeController:_applyEffects(active)
 	local playerGui = self._player:FindFirstChild("PlayerGui")
 	local mainHud = playerGui and playerGui:FindFirstChild("Main")
 	if mainHud and mainHud:IsA("ScreenGui") then
-		for _, child in ipairs(mainHud:GetChildren()) do
-			if child:IsA("GuiObject") and child.Name ~= "CoinsFrame" then
-				child.Visible = not active
+		if active then
+			if not self._mainSnapshot then
+				self._mainSnapshot = {}
+				for _, child in ipairs(mainHud:GetChildren()) do
+					if child:IsA("GuiObject") and child.Name ~= "CoinsFrame" and child.Name ~= "Bucks" and child.Name ~= "FriendsFrame" and child.Name ~= "DiamondsFrame" then
+						self._mainSnapshot[child] = child.Visible
+						child.Visible = false
+					end
+				end
+			end
+		else
+			if self._mainSnapshot then
+				for child, wasVisible in pairs(self._mainSnapshot) do
+					if child and child.Parent then
+						child.Visible = wasVisible
+					end
+				end
+				self._mainSnapshot = nil
 			end
 		end
 	end
@@ -128,6 +143,8 @@ function UpgradeController:_bindGui(gui: ScreenGui)
 	local StatCalculator = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("StatCalculator"))
 
 	local function updateSwordUI()
+		if not swordPanel or not swordPanel.Parent then return end
+		
 		local stats = player:WaitForChild("Stats")
 		local swordVal = stats:WaitForChild("Swords")
 		local currentSword = swordVal:FindFirstChild("CurrentSword") and swordVal.CurrentSword.Value or swordVal.Value
@@ -141,8 +158,9 @@ function UpgradeController:_bindGui(gui: ScreenGui)
 		-- Get damage from player attribute
 		local damage = player:GetAttribute("Damage") or 0
 
-		local btnFrame = swordPanel:WaitForChild("BtnFrame")
-		local upgradeBtn = btnFrame:WaitForChild("btn")
+		local btnFrame = swordPanel:FindFirstChild("BtnFrame")
+		if not btnFrame then return end
+		local upgradeBtn = btnFrame:FindFirstChild("btn")
 		if not upgradeBtn then return end
 		local priceLabel = upgradeBtn:FindFirstChild("price")
 		
@@ -159,7 +177,7 @@ function UpgradeController:_bindGui(gui: ScreenGui)
 			lvlLabel.Text = string.format("%d/%d", level, config.MaxLevel) 
 		end
 		if dmgLabel and (dmgLabel:IsA("TextLabel") or dmgLabel:IsA("TextBox")) then 
-			dmgLabel.Text = string.format("%.1f", damage) 
+			dmgLabel.Text = NumberFormatter:Format(damage, "Letters")
 		end
 		
 		if level >= config.MaxLevel then
@@ -170,6 +188,8 @@ function UpgradeController:_bindGui(gui: ScreenGui)
 	end
 
 	local function updateSpeedUI()
+		if not speedPanel or not speedPanel.Parent then return end
+
 		local stats = player:WaitForChild("Stats")
 		local upgrades = stats:WaitForChild("Upgrades")
 		local wsLevelVal = upgrades:WaitForChild("Walkspeed")
@@ -177,7 +197,7 @@ function UpgradeController:_bindGui(gui: ScreenGui)
 		
 		local config = self._config.Upgrades.Walkspeed
 		local cost = math.floor(config.BaseCost * (config.CostMultiplier ^ (level - 1)))
-		local currentSpeed = 16 + (level * config.SpeedBonusPerLevel)
+		local currentSpeed = StatCalculator.CalculateWalkspeed(level, self._config)
 		
 		local btnFrame = speedPanel:FindFirstChild("BtnFrame")
 		if not btnFrame then return end
@@ -198,7 +218,7 @@ function UpgradeController:_bindGui(gui: ScreenGui)
 			lvlLabel.Text = string.format("%d/%d", level, config.MaxLevel) 
 		end
 		if speedLabel and (speedLabel:IsA("TextLabel") or speedLabel:IsA("TextBox")) then 
-			speedLabel.Text = string.format("%d", currentSpeed) 
+			speedLabel.Text = NumberFormatter:Format(currentSpeed, "Letters")
 		end
 		
 		if level >= config.MaxLevel then

@@ -31,11 +31,22 @@ function LeaderstatsService:_setupPlayer(player: Player)
 	local leaderstats = getOrCreateFolder(player, "leaderstats")
 	local bucks = getOrCreateValue(leaderstats, "IntValue", "Bucks")
 	bucks.Value = bucks.Value or 0
+	
+	local rebirths = getOrCreateValue(leaderstats, "IntValue", "Rebirths")
+	rebirths.Value = rebirths.Value or 0
+
+	local diamonds = getOrCreateValue(leaderstats, "IntValue", "Diamonds")
+	diamonds.Value = diamonds.Value or 0
 
 	local stats = getOrCreateFolder(player, "Stats")
 	local multiplier = getOrCreateValue(stats, "NumberValue", "Multiplier")
 	if multiplier.Value == 0 then
 		multiplier.Value = 1
+	end
+	
+	local baseUpgrade = getOrCreateValue(stats, "IntValue", "BaseUpgrade")
+	if baseUpgrade.Value == 0 then
+		baseUpgrade.Value = 1
 	end
 
 	-- Swords setup
@@ -63,6 +74,10 @@ function LeaderstatsService:_setupPlayer(player: Player)
 	local unlockedAreas = getOrCreateFolder(stats, "UnlockedAreas")
 	local plains = getOrCreateValue(unlockedAreas, "BoolValue", "Plains")
 	plains.Value = true -- Plains is always unlocked by default
+
+	-- Merchant setup
+	local merchantFolder = getOrCreateFolder(stats, "Merchant")
+	getOrCreateValue(merchantFolder, "BoolValue", "SellAllUnlocked")
 
 	if player:GetAttribute("Damage") == nil then
 		player:SetAttribute("Damage", 0)
